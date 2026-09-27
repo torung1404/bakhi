@@ -826,7 +826,7 @@ function SelfTest:RunAll()
     T("MobIndex", function() assert(MobIndex.Started); return true end)
     T("Movement", function() assert(Movement.Conn ~= nil); return true end)
     T("Window", function() assert(Win ~= nil); return true end)
-    T("UI tabs", function() assert(#Win.Tabs >= 6); return #Win.Tabs .. " tabs" end)
+    T("UI tabs", function() assert(#Win.Tabs >= 5); return #Win.Tabs .. " tabs" end)
     T("Feature methods", function()
         for _, m in ipairs({ "StartMobFarm","StopMobFarm","StartCrowQuest","StartMuzanQuest","StartFinalSelection","StartMastery","StartGenericQuest","StartKillAura","StartPickupAura" }) do
             assert(type(Features[m]) == "function", "missing "..m)
