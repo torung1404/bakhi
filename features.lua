@@ -1,5 +1,5 @@
 -- ============================================================
--- Slayers 2 Delta - Features (Fixed v2)
+-- Slayers 2 Delta - Features (Fixed v3)
 -- ============================================================
 
 local S2 = getgenv().S2
@@ -22,22 +22,50 @@ local LocalPlayer = Players.LocalPlayer
 local VirtualInputManager
 pcall(function() VirtualInputManager = game:GetService("VirtualInputManager") end)
 
+-- FIX: pressKey dùng executor built-in keypress trước, fallback VirtualInputManager
 local function pressKey(k)
-    if not VirtualInputManager or not Enum.KeyCode[k] then return false end
-    pcall(function()
-        VirtualInputManager:SendKeyEvent(true, Enum.KeyCode[k], false, game)
+    local kc = Enum.KeyCode[k]
+    if not kc then return false end
+    if type(keypress) == "function" then
+        pcall(keypress, kc)
         task.wait(0.05)
-        VirtualInputManager:SendKeyEvent(false, Enum.KeyCode[k], false, game)
-    end)
-    return true
+        if type(keyrelease) == "function" then pcall(keyrelease, kc) end
+        return true
+    end
+    if VirtualInputManager then
+        local ok = pcall(function()
+            VirtualInputManager:SendKeyEvent(true, kc, false, game)
+            task.wait(0.05)
+            VirtualInputManager:SendKeyEvent(false, kc, false, game)
+        end)
+        if ok then return true end
+        pcall(function()
+            VirtualInputManager:SendKeyEvent(true, kc, false, nil)
+            task.wait(0.05)
+            VirtualInputManager:SendKeyEvent(false, kc, false, nil)
+        end)
+        return true
+    end
+    warn("[S2] pressKey failed: no input method for", k)
+    return false
 end
+
 local function holdStart(k)
-    if not VirtualInputManager or not Enum.KeyCode[k] then return end
-    pcall(function() VirtualInputManager:SendKeyEvent(true, Enum.KeyCode[k], false, game) end)
+    local kc = Enum.KeyCode[k]
+    if not kc then return end
+    if type(keypress) == "function" then pcall(keypress, kc); return end
+    if VirtualInputManager then
+        pcall(function() VirtualInputManager:SendKeyEvent(true, kc, false, game) end)
+    end
 end
+
 local function holdStop(k)
-    if not VirtualInputManager or not Enum.KeyCode[k] then return end
-    pcall(function() VirtualInputManager:SendKeyEvent(false, Enum.KeyCode[k], false, game) end)
+    local kc = Enum.KeyCode[k]
+    if not kc then return end
+    if type(keyrelease) == "function" then pcall(keyrelease, kc); return end
+    if VirtualInputManager then
+        pcall(function() VirtualInputManager:SendKeyEvent(false, kc, false, game) end)
+    end
 end
 
 local Features = {}
@@ -490,25 +518,136 @@ function CrowQuest:FindMob(name, origin, radius)
     return best
 end
 
+-- FIX: CollectLoot dùng 5 nguồn loot, quét 3 vòng
 function CrowQuest:CollectLoot(position, radius)
-    radius = radius or 120
+    radius = radius or 200
     local CS = game:GetService("CollectionService")
     local r = GameAPI:GetRoot()
     if not r then return end
-    for _, o in ipairs(CS:GetTagged("LootDrop")) do
-        if not self.Active then return end
-        local p = o:IsA("BasePart") and o or o:FindFirstChildWhichIsA("BasePart")
-        if p and (p.Position - position).Magnitude < radius then
-            r.CFrame = p.CFrame * CFrame.new(0, 0, 2)
-            r.AssemblyLinearVelocity = Vector3.zero
-            task.wait(0.2)
-            for _, d in ipairs(o:GetDescendants()) do
-                if d:IsA("ProximityPrompt") and d.Enabled then
-                    pcall(fireproximityprompt, d); break
+
+    task.wait(1.5)
+
+    for _ = 1, 3 do
+        local foundAny = false
+
+        -- Nguồn 1: tag LootDrop
+        pcall(function()
+            for _, obj in ipairs(CS:GetTagged("LootDrop")) do
+                if not self.Active then return end
+                local part = obj:IsA("BasePart") and obj or obj:FindFirstChildWhichIsA("BasePart")
+                if part and (part.Position - position).Magnitude < radius then
+                    foundAny = true
+                    r.CFrame = part.CFrame * CFrame.new(0, 0, 2)
+                    r.AssemblyLinearVelocity = Vector3.zero
+                    task.wait(0.2)
+                    for _, desc in ipairs(obj:GetDescendants()) do
+                        if desc:IsA("ProximityPrompt") and desc.Enabled then
+                            pcall(fireproximityprompt, desc)
+                            break
+                        end
+                    end
+                    local prompt = obj:FindFirstChildOfClass("ProximityPrompt")
+                    if prompt then pcall(fireproximityprompt, prompt) end
+                    task.wait(0.4)
                 end
             end
-            task.wait(0.3)
-        end
+        end)
+
+        -- Nguồn 2: tag Chest
+        pcall(function()
+            for _, obj in ipairs(CS:GetTagged("Chest")) do
+                if not self.Active then return end
+                local rootPart = obj:FindFirstChild("RootPart") or obj:FindFirstChildWhichIsA("BasePart")
+                if rootPart and (rootPart.Position - position).Magnitude < radius then
+                    for _, desc in ipairs(obj:GetDescendants()) do
+                        if desc:IsA("ProximityPrompt") and desc.Enabled then
+                            foundAny = true
+                            r.CFrame = rootPart.CFrame * CFrame.new(0, 0, 3)
+                            r.AssemblyLinearVelocity = Vector3.zero
+                            task.wait(0.3)
+                            pcall(fireproximityprompt, desc)
+                            task.wait(1)
+                            break
+                        end
+                    end
+                end
+            end
+        end)
+
+        -- Nguồn 3: workspace.LootDrops
+        pcall(function()
+            local ld = workspace:FindFirstChild("LootDrops")
+            if not ld then return end
+            for _, child in ipairs(ld:GetChildren()) do
+                if not self.Active then return end
+                local part = child:IsA("BasePart") and child or child:FindFirstChildWhichIsA("BasePart")
+                if part and (part.Position - position).Magnitude < radius then
+                    foundAny = true
+                    r.CFrame = part.CFrame * CFrame.new(0, 0, 2)
+                    r.AssemblyLinearVelocity = Vector3.zero
+                    task.wait(0.2)
+                    for _, desc in ipairs(child:GetDescendants()) do
+                        if desc:IsA("ProximityPrompt") then
+                            pcall(fireproximityprompt, desc)
+                            break
+                        end
+                    end
+                    task.wait(0.3)
+                end
+            end
+        end)
+
+        -- Nguồn 4: workspace.Chests
+        pcall(function()
+            local ch = workspace:FindFirstChild("Chests")
+            if not ch then return end
+            for _, child in ipairs(ch:GetChildren()) do
+                if not self.Active then return end
+                local rootPart = child:FindFirstChild("RootPart") or child:FindFirstChildWhichIsA("BasePart")
+                if rootPart and (rootPart.Position - position).Magnitude < radius then
+                    for _, desc in ipairs(child:GetDescendants()) do
+                        if desc:IsA("ProximityPrompt") and desc.Enabled then
+                            foundAny = true
+                            r.CFrame = rootPart.CFrame * CFrame.new(0, 0, 3)
+                            r.AssemblyLinearVelocity = Vector3.zero
+                            task.wait(0.3)
+                            pcall(fireproximityprompt, desc)
+                            task.wait(1)
+                            break
+                        end
+                    end
+                end
+            end
+        end)
+
+        -- Nguồn 5: quét Debree
+        pcall(function()
+            local db = workspace:FindFirstChild("Debree")
+            if not db then return end
+            for _, child in ipairs(db:GetChildren()) do
+                if not self.Active then return end
+                local name = child.Name:lower()
+                if name:find("loot") or name:find("drop") or name:find("chest") or name:find("reward") then
+                    local part = child:IsA("BasePart") and child or child:FindFirstChildWhichIsA("BasePart")
+                    if part and (part.Position - position).Magnitude < radius then
+                        foundAny = true
+                        r.CFrame = part.CFrame * CFrame.new(0, 0, 2)
+                        r.AssemblyLinearVelocity = Vector3.zero
+                        task.wait(0.2)
+                        for _, desc in ipairs(child:GetDescendants()) do
+                            if desc:IsA("ProximityPrompt") and desc.Enabled then
+                                pcall(fireproximityprompt, desc)
+                                break
+                            end
+                        end
+                        task.wait(0.3)
+                    end
+                end
+            end
+        end)
+
+        if not foundAny then break end
+        task.wait(0.5)
     end
 end
 
@@ -593,7 +732,7 @@ function CrowQuest:Run(tok)
         end
         task.wait(0.25)
     end
-    self:CollectLoot(boss.cf.Position, 120)
+    self:CollectLoot(boss.cf.Position, 200)
     return true
 end
 
@@ -716,7 +855,7 @@ function MuzanQuest:Run(tok)
         end
         task.wait(0.25)
     end
-    CrowQuest:CollectLoot(boss.cf.Position, 120)
+    CrowQuest:CollectLoot(boss.cf.Position, 200)
     return true
 end
 
@@ -1151,7 +1290,7 @@ function Features:StopKillAura() stopJob("KillAura") end
 
 function Features:StartPickupAura(radius)
     self:StopPickupAura()
-    radius = tonumber(radius) or 120
+    radius = tonumber(radius) or 200
     spawnJob("PickupAura", function(tok)
         while tok.Active and Runtime.Alive do
             local r = GameAPI:GetRoot()
