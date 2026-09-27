@@ -1,0 +1,5 @@
+config.json
+.env
+*.key
+*.secret
+bakhi/
