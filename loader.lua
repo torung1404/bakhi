@@ -1,9 +1,8 @@
 -- Slayers 2 Delta Loader
--- Chạy file này trong Delta. Không chứa logic game.
+-- Repo: torung1404/bakhi
 
-local REPO = "YOUR_USERNAME/slayers2-delta/main"  -- <-- SỬA DÒNG NÀY
+local REPO = "torung1404/bakhi/main"
 local BASE = "https://raw.githubusercontent.com/" .. REPO .. "/"
-
 local files = { "core.lua", "features.lua", "ui.lua" }
 
 for _, f in ipairs(files) do
@@ -15,6 +14,7 @@ for _, f in ipairs(files) do
 
     if not ok or not code or #code < 10 then
         warn("[S2 LOADER] Failed to fetch " .. f)
+        if code then warn("[S2 LOADER] Response: " .. tostring(code):sub(1, 200)) end
         return
     end
 
@@ -24,9 +24,9 @@ for _, f in ipairs(files) do
         return
     end
 
-    local runOk, runErr = pcall(fn)
-    if not runOk then
-        warn("[S2 LOADER] Runtime error in " .. f .. ": " .. tostring(runErr))
+    local rOk, rErr = pcall(fn)
+    if not rOk then
+        warn("[S2 LOADER] Runtime error in " .. f .. ": " .. tostring(rErr))
         return
     end
 
