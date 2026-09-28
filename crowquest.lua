@@ -1,4 +1,4 @@
--- crowquest.lua - Crow Quest v4 (reverted scan + fixed parse)
+-- crowquest.lua - Crow Quest v5 (added mouse click for summon)
 local S2 = getgenv().S2
 if not S2 or not S2.Core then return warn("[Crow] core missing") end
 if not S2.Features then return warn("[Crow] features missing") end
@@ -15,15 +15,11 @@ local CrowQuest = S2.Features.CrowQuest
 if not CrowQuest then return warn("[Crow] no CrowQuest table") end
 
 CrowQuest.Cfg = CrowQuest.Cfg or {
-    CrowSlot = 3,
-    WeaponSlot = 1,
-    Priority = "HighestExp",
-    MaxHuntLevel = 125,
-    RetryDelay = 2.0,
-    AutoLootBoss = false,
+    CrowSlot = 3, WeaponSlot = 1, Priority = "HighestExp",
+    MaxHuntLevel = 125, RetryDelay = 2.0, AutoLootBoss = false,
 }
 
--- ============ Quest helpers ============
+-- ============ Helpers ============
 local function getQuestHolder()
     local q = S2.Features.QuestEngine
     if not q then return nil end
@@ -60,7 +56,6 @@ local function getActiveQuestBoss()
     return nil
 end
 
--- ============ Input ============
 local function pressSlot(slot)
     if not keypress or not keyrelease then return end
     slot = math.clamp(tonumber(slot) or 1, 1, 5)
@@ -76,15 +71,38 @@ local function pressSlot(slot)
     log("[Crow] pressed slot " .. slot)
 end
 
--- ============ Menu scanner (SAME AS V2) ============
+-- FIX: thêm mouse click sau keypress
+local function summonCrow(slot)
+    pressSlot(slot)
+    task.wait(0.5)
+
+    pcall(function()
+        if setrobloxinput then setrobloxinput(true) end
+        if mouse1click then
+            mouse1click()
+        elseif mouse1press and mouse1release then
+            mouse1press()
+            task.wait(0.06)
+            mouse1release()
+        else
+            local vu = game:GetService("VirtualUser")
+            local cam = workspace.CurrentCamera
+            vu:CaptureController()
+            vu:ClickButton1(Vector2.new(cam.ViewportSize.X * 0.5, cam.ViewportSize.Y * 0.5))
+            vu:ReleaseController()
+        end
+    end)
+    log("[Crow] clicked to summon")
+    task.wait(0.6)
+end
+
+-- ============ Menu scanner ============
 local function getDialogueFrame()
     local pg = LP:FindFirstChild("PlayerGui")
     if not pg then return nil end
     local holder = pg:FindFirstChild("ComponentsHolder")
     if not holder then return nil end
-    local frame = holder:FindFirstChild("DialogueFrame")
-    if not frame then return nil end
-    return frame
+    return holder:FindFirstChild("DialogueFrame")
 end
 
 local function parseNumbers(text)
@@ -103,7 +121,6 @@ function CrowQuest:ScanMenu()
     if not df then return {} end
     local actual = df:FindFirstChild("Actual")
     if not actual then return {} end
-
     local bh = actual:FindFirstChild("ButtonHolder")
     if not bh then return {} end
 
@@ -111,10 +128,7 @@ function CrowQuest:ScanMenu()
     for _, frame in ipairs(bh:GetChildren()) do
         if not frame:IsA("Frame") then continue end
 
-        -- Find button
         local btn = frame:FindFirstChild("TextButton") or frame
-
-        -- Extract boss name from any descendant text
         local bossName = nil
         local fullText = ""
         for _, d in ipairs(frame:GetDescendants()) do
@@ -133,7 +147,6 @@ function CrowQuest:ScanMenu()
         end
         if not bossName then continue end
 
-        -- Parse ALL numbers from frame descendants
         local allNums = {}
         for _, d in ipairs(frame:GetDescendants()) do
             if d:IsA("TextLabel") or d:IsA("TextButton") then
@@ -142,11 +155,8 @@ function CrowQuest:ScanMenu()
                 end
             end
         end
-        -- Sort descending: [0]=exp, [1]=wen (typically)
         table.sort(allNums, function(a, b) return a > b end)
-
         local exp, wen = 0, 0
-        -- exp is usually >= 1000, wen is 3-4 digits
         for _, n in ipairs(allNums) do
             if n >= 1000 and exp == 0 then
                 exp = n
@@ -155,69 +165,33 @@ function CrowQuest:ScanMenu()
             end
         end
 
-        -- Also try to find exp by "Exp" or "×" markers
-        for _, d in ipairs(frame:GetDescendants()) do
-            if d:IsA("TextLabel") or d:IsA("TextButton") then
-                local t = d.Text or ""
-                if t:find("Exp", 1, true) or t:find("exp", 1, true) then
-                    local nums = parseNumbers(t)
-                    for _, n in ipairs(nums) do
-                        if n >= 1000 then exp = n break end
-                    end
-                end
-                if t:find("Wen", 1, true) or t:find("wen", 1, true) then
-                    local nums = parseNumbers(t)
-                    for _, n in ipairs(nums) do
-                        if n >= 100 and n < 100000 then wen = n break end
-                    end
-                end
-            end
-        end
-
-        -- Get button position
         local ap = btn.AbsolutePosition or Vector2.new(0, 0)
         local as = btn.AbsoluteSize or Vector2.new(100, 30)
 
         table.insert(choices, {
-            Boss = bossName,
-            Exp = exp,
-            Wen = wen,
-            Button = btn,
-            Frame = frame,
-            X = ap.X + as.X * 0.5,
-            Y = ap.Y + as.Y * 0.5,
+            Boss = bossName, Exp = exp, Wen = wen,
+            Button = btn, Frame = frame,
+            X = ap.X + as.X * 0.5, Y = ap.Y + as.Y * 0.5,
         })
     end
-
     return choices
 end
 
--- ============ Pick best ============
 function CrowQuest:PickBestMission(choices)
     if #choices == 0 then return nil end
-    local priority = self.Cfg.Priority or "HighestExp"
-
-    if priority == "Random" then
+    if (self.Cfg.Priority or "HighestExp") == "Random" then
         return choices[math.random(1, #choices)]
     end
-
     local sorted = {}
     for _, c in ipairs(choices) do table.insert(sorted, c) end
-
     table.sort(sorted, function(a, b)
-        if priority == "HighestExp" then
-            if a.Exp ~= b.Exp then return a.Exp > b.Exp end
-            return a.Wen > b.Wen
-        else
-            return a.Exp > b.Exp
-        end
+        if a.Exp ~= b.Exp then return a.Exp > b.Exp end
+        return a.Wen > b.Wen
     end)
     return sorted[1]
 end
 
--- ============ Click ============
 local function clickMission(choice)
-    -- Method 1: firesignal
     if choice.Button and firesignal then
         local ok = pcall(firesignal, choice.Button.MouseButton1Click)
         if ok then
@@ -225,8 +199,6 @@ local function clickMission(choice)
             return true
         end
     end
-
-    -- Method 2: mouse move + mousemoveabs + click
     local mouse = LP:GetMouse()
     if mouse and mousemoverel then
         pcall(function()
@@ -234,7 +206,6 @@ local function clickMission(choice)
             mousemoverel(choice.X - mouse.X, choice.Y - mouse.Y)
         end)
         task.wait(0.15)
-
         if mouse1click then
             pcall(function()
                 if setrobloxinput then setrobloxinput(true) end
@@ -243,35 +214,10 @@ local function clickMission(choice)
             log("[Crow] clicked via mouse1click")
             return true
         end
-
-        if mouse1press and mouse1release then
-            pcall(function()
-                if setrobloxinput then setrobloxinput(true) end
-                mouse1press()
-                task.wait(0.1)
-                mouse1release()
-            end)
-            log("[Crow] clicked via mouse1press/release")
-            return true
-        end
     end
-
-    -- Method 3: VirtualUser
-    local ok = pcall(function()
-        local vu = game:GetService("VirtualUser")
-        vu:CaptureController()
-        vu:ClickButton1(Vector2.new(choice.X, choice.Y))
-        vu:ReleaseController()
-    end)
-    if ok then
-        log("[Crow] clicked via VirtualUser")
-        return true
-    end
-
     return false
 end
 
--- ============ Wait helper ============
 local function waitFor(tok, pred, timeout)
     local t = 0
     while tok.Active and Runtime.Alive and t < timeout do
@@ -283,17 +229,14 @@ local function waitFor(tok, pred, timeout)
     return false
 end
 
--- ============ Fight boss ============
 function CrowQuest:FightBoss(tok, boss)
     if boss.cf then
         GameAPI:Teleport(boss.cf + Vector3.new(0, 3, 0))
         task.wait(0.5)
     end
-
     local deathTimer = 0
     while tok.Active and Runtime.Alive do
         if not getActiveQuestBoss() then return true end
-
         local char = LP.Character
         local hum = char and char:FindFirstChildOfClass("Humanoid")
         if not hum or hum.Health <= 0 then
@@ -303,18 +246,13 @@ function CrowQuest:FightBoss(tok, boss)
             continue
         end
         deathTimer = 0
-
         local root = char:FindFirstChild("HumanoidRootPart")
         if not root then task.wait(0.3); continue end
-
         local bossModel = self.FindMob and self:FindMob(boss.name, root.Position, 500)
         if bossModel then
             local bossRoot = bossModel:FindFirstChild("HumanoidRootPart")
             if bossRoot then
-                root.CFrame = CFrame.lookAt(
-                    bossRoot.Position - Vector3.new(0, 6.5, 0),
-                    bossRoot.Position
-                )
+                root.CFrame = CFrame.lookAt(bossRoot.Position - Vector3.new(0, 6.5, 0), bossRoot.Position)
                 root.AssemblyLinearVelocity = Vector3.zero
                 Combat:Swing("Combat")
             end
@@ -327,7 +265,6 @@ function CrowQuest:FightBoss(tok, boss)
     return false
 end
 
--- ============ Main Run ============
 function CrowQuest:Run(tok)
     local cfg = self.Cfg
     local retry = tonumber(cfg.RetryDelay) or 2.0
@@ -341,10 +278,10 @@ function CrowQuest:Run(tok)
             continue
         end
 
-        log("[Crow] equipping crow (slot " .. tostring(cfg.CrowSlot) .. ")")
-        pressSlot(cfg.CrowSlot)
+        -- FIX: dùng summonCrow (keypress + click)
+        log("[Crow] summoning crow (slot " .. tostring(cfg.CrowSlot) .. ")")
+        summonCrow(cfg.CrowSlot)
 
-        -- Wait for menu (crow auto-opens it)
         local gotMenu = waitFor(tok, function()
             return #self:ScanMenu() > 0
         end, 8)
@@ -374,7 +311,6 @@ function CrowQuest:Run(tok)
         clickMission(best)
         task.wait(0.8)
 
-        -- Wait for quest
         local gotQuest = waitFor(tok, function()
             return getActiveQuestBoss() ~= nil
         end, 10)
@@ -416,7 +352,6 @@ task.spawn(function()
     if not questTab then return end
 
     local crowGB = window:AddGroupbox(questTab, "Crow Quest")
-
     window:AddDropdown(crowGB, "_CrowSlot", {
         Text = "Crow Slot",
         Values = { "1", "2", "3", "4", "5" },
@@ -445,8 +380,7 @@ task.spawn(function()
         Default = CrowQuest.Cfg.AutoLootBoss,
         Callback = function(on) CrowQuest.Cfg.AutoLootBoss = on end,
     })
-
     log("[Crow] UI settings added")
 end)
 
-print("[ToRung/CROW] v4 loaded")
+print("[ToRung/CROW] v5 loaded")
