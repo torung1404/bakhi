@@ -1,197 +1,88 @@
--- lobby.lua - Separate Lobby HUD for server selection
+-- lobby.lua - VIP Server tab for main HUD (same style)
 local S2 = getgenv().S2
-if not S2 or not S2.Core or not S2.VIP then
+if not S2 or not S2.UI or not S2.VIP then
     return warn("[Lobby] deps missing")
 end
 
+local window = S2.UI.Window
 local VIP = S2.VIP
-local log = S2.Core.log
-local TweenService = game:GetService("TweenService")
-local UIS = game:GetService("UserInputService")
+local Themes = S2.UI.Themes
+if not window then return warn("[Lobby] no window") end
 
-local SHOW_KEY = "ToRungHub/lobby_shown.txt"
+-- ============ VIP Server tab ============
+local vipTab = window:AddTab("VIP Server")
+local mainGB = window:AddGroupbox(vipTab, "Private Server")
 
-local Themes = {
-    Bg = Color3.fromRGB(14, 14, 18),
-    Panel = Color3.fromRGB(20, 20, 26),
-    Stroke = Color3.fromRGB(36, 36, 44),
-    Accent = Color3.fromRGB(138, 121, 231),
-    Text = Color3.fromRGB(200, 200, 210),
-    SubText = Color3.fromRGB(130, 130, 145),
-    ElementBg = Color3.fromRGB(16, 16, 22),
-    ElementStroke = Color3.fromRGB(30, 30, 38),
-    Success = Color3.fromRGB(56, 186, 91),
-    Danger = Color3.fromRGB(206, 51, 66),
-}
-
-local function new(cls, props, children)
-    local i = Instance.new(cls)
-    for k, v in pairs(props or {}) do
-        if k ~= "Parent" then i[k] = v end
-    end
-    for _, c in ipairs(children or {}) do c.Parent = i end
-    if props and props.Parent then i.Parent = props.Parent end
-    return i
-end
-
-local Lobby = {}
-Lobby.Window = nil
-Lobby.Flags = {}
-
-local function wasShownBefore()
-    if not isfolder("ToRungHub") then makefolder("ToRungHub") end
-    return isfile(SHOW_KEY)
-end
-
-local function markShown()
-    if not isfolder("ToRungHub") then makefolder("ToRungHub") end
-    pcall(function() writefile(SHOW_KEY, "1") end)
-end
-
-local function makeLabel(parent, text, size, pos, color)
-    return new("TextLabel", {
-        Parent = parent, BackgroundTransparency = 1,
-        Text = text, TextColor3 = color or Themes.Text,
-        TextSize = size or 13, Font = Enum.Font.Gotham,
-        TextXAlignment = Enum.TextXAlignment.Left,
-        Position = pos or UDim2.new(0, 0, 0, 0),
-        Size = UDim2.new(1, 0, 0, 16),
-    })
-end
-
-function Lobby:Build()
-    if self.Window then return end
-
-    local parent = (type(gethui) == "function" and gethui()) or game:GetService("CoreGui")
-    local sg = new("ScreenGui", {
-        Name = "ToRungLobby",
-        ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
-        ResetOnSpawn = false, IgnoreGuiInset = true,
-        DisplayOrder = 9998, Parent = parent,
-    })
-
-    local main = new("Frame", {
-        Name = "LobbyMain", Parent = sg,
-        BackgroundColor3 = Themes.Bg, BorderSizePixel = 0,
-        AnchorPoint = Vector2.new(0.5, 0.5),
-        Position = UDim2.fromScale(0.5, 0.5),
-        Size = UDim2.fromOffset(360, 440),
-        Visible = true,
-    })
-    new("UICorner", { CornerRadius = UDim.new(0, 6), Parent = main })
-    new("UIStroke", { Color = Themes.Stroke, Thickness = 1.5,
-        ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = main })
-
-    -- Top bar
-    local top = new("Frame", {
-        Parent = main, BackgroundColor3 = Themes.Panel,
-        BorderSizePixel = 0, Size = UDim2.new(1, 0, 0, 36),
-    })
-    new("UICorner", { CornerRadius = UDim.new(0, 6), Parent = top })
-    makeLabel(top, "  Server Lobby", 14, UDim2.new(0, 8, 0, 8), Themes.Text)
-    local close = new("TextButton", {
-        Parent = top, BackgroundTransparency = 1,
-        Text = "X", TextColor3 = Themes.SubText, TextSize = 14,
-        Font = Enum.Font.GothamBold,
-        AnchorPoint = Vector2.new(1, 0.5),
-        Position = UDim2.new(1, -8, 0.5, 0),
-        Size = UDim2.fromOffset(24, 24),
-    })
-    close.MouseButton1Click:Connect(function() main.Visible = false end)
-
-    -- Enable toggle
-    local enableRow = new("Frame", {
-        Parent = main, BackgroundTransparency = 1,
-        Position = UDim2.fromOffset(12, 48),
-        Size = UDim2.new(1, -24, 0, 24),
-    })
-    makeLabel(enableRow, "Enable VIP Server", 13, UDim2.new(0, 0, 0, 4))
-    local enableBtn = new("TextButton", {
-        Parent = enableRow, BackgroundColor3 = VIP.Enabled and Themes.Success or Themes.ElementBg,
-        BorderSizePixel = 0, Text = VIP.Enabled and "ON" or "OFF",
-        TextColor3 = Color3.fromRGB(255, 255, 255), TextSize = 12,
-        Font = Enum.Font.GothamBold,
-        AnchorPoint = Vector2.new(1, 0),
-        Position = UDim2.new(1, 0, 0, 2),
-        Size = UDim2.fromOffset(50, 20),
-    })
-    new("UICorner", { CornerRadius = UDim.new(0, 4), Parent = enableBtn })
-    enableBtn.MouseButton1Click:Connect(function()
-        VIP.Enabled = not VIP.Enabled
-        enableBtn.Text = VIP.Enabled and "ON" or "OFF"
-        enableBtn.BackgroundColor3 = VIP.Enabled and Themes.Success or Themes.ElementBg
+window:AddToggle(mainGB, "_VipEnabled", {
+    Text = "Enable VIP Server",
+    Description = "Join the configured private server on launch",
+    Default = VIP.Enabled,
+    Callback = function(on)
+        VIP.Enabled = on and true or false
         VIP:Save()
-    end)
+    end,
+})
 
-    -- Mode dropdown (simple 3-button toggle)
-    makeLabel(main, "Mode:", 13, UDim2.fromOffset(12, 82))
-    local modes = { "MyPS", "ServerID", "Link" }
-    local modeButtons = {}
-    for i, mode in ipairs(modes) do
-        local btn = new("TextButton", {
-            Parent = main, BackgroundColor3 = VIP.Mode == mode and Themes.Accent or Themes.ElementBg,
-            BorderSizePixel = 0, Text = mode,
-            TextColor3 = VIP.Mode == mode and Color3.fromRGB(255, 255, 255) or Themes.Text,
-            TextSize = 11, Font = Enum.Font.Gotham,
-            Position = UDim2.fromOffset(60 + (i - 1) * 92, 80),
-            Size = UDim2.fromOffset(86, 22),
-        })
-        new("UICorner", { CornerRadius = UDim.new(0, 4), Parent = btn })
-        modeButtons[mode] = btn
-        btn.MouseButton1Click:Connect(function()
-            VIP.Mode = mode
-            for m, b in pairs(modeButtons) do
-                local sel = (m == mode)
-                b.BackgroundColor3 = sel and Themes.Accent or Themes.ElementBg
-                b.TextColor3 = sel and Color3.fromRGB(255, 255, 255) or Themes.Text
-            end
-            VIP:Save()
-        end)
-    end
-
-    -- Info line
-    local info = makeLabel(main, "", 11, UDim2.fromOffset(12, 112), Themes.SubText)
-    info.Size = UDim2.new(1, -24, 0, 16)
-
-    local function refreshInfo()
-        if VIP.Mode == "MyPS" or VIP.Mode == "ServerID" then
-            if VIP.ServerId ~= "" then
-                info.Text = "PlaceId: " .. tostring(VIP.PlaceId)
-                    .. "  Server: " .. tostring(VIP.ServerId):sub(1, 16) .. "..."
-            else
-                info.Text = "Not configured. Capture or paste server ID below."
-            end
-        elseif VIP.Mode == "Link" then
-            info.Text = VIP.LinkCode ~= "" and ("LinkCode: " .. VIP.LinkCode:sub(1, 20) .. "...") or "No link set."
+window:AddDropdown(mainGB, "_VipMode", {
+    Text = "Mode",
+    Description = "How to identify the VIP server",
+    Values = { "MyPS", "ServerID", "Link" },
+    Default = VIP.Mode,
+    Callback = function(v)
+        VIP.Mode = v or "MyPS"
+        VIP:Save()
+        if window.Options._VipInfo then
+            window.Options._VipInfo:SetText("")
         end
+    end,
+})
+
+local infoLabel = window:AddInput(mainGB, "_VipInfoDummy", {
+    Text = "Current Info",
+    Default = "",
+    Placeholder = "No server configured",
+    Callback = function() end,
+})
+infoLabel.Type = "InfoLabel"
+
+-- Override: make it read-only display
+if infoLabel.Holder then
+    local box = infoLabel.Holder:FindFirstChildWhichIsA("TextBox", true)
+    if box then
+        box.TextEditable = false
+        box.BackgroundTransparency = 1
     end
+end
 
-    -- Input box
-    local inputHolder = new("Frame", {
-        Parent = main, BackgroundColor3 = Themes.ElementBg,
-        BorderSizePixel = 0,
-        Position = UDim2.fromOffset(12, 136),
-        Size = UDim2.new(1, -24, 0, 28),
-    })
-    new("UICorner", { CornerRadius = UDim.new(0, 4), Parent = inputHolder })
-    new("UIStroke", { Color = Themes.ElementStroke,
-        ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = inputHolder })
+window:AddButton(mainGB, {
+    Text = "Capture Current Server",
+    Description = "Read the current PS info and save it",
+    Func = function()
+        local ok = VIP:CaptureCurrent()
+        if ok then
+            window:Notify({
+                Title = "VIP Server",
+                Description = "Captured: " .. tostring(VIP.ServerId):sub(1, 16) .. "...",
+                Color = Themes.Success,
+            })
+        else
+            window:Notify({
+                Title = "VIP Server",
+                Description = "Capture failed - you may not be in a PS",
+                Color = Themes.Danger,
+            })
+        end
+    end,
+})
 
-    local input = new("TextBox", {
-        Parent = inputHolder, BackgroundTransparency = 1,
-        Text = "", TextColor3 = Themes.Text, TextSize = 12,
-        Font = Enum.Font.Gotham, TextXAlignment = Enum.TextXAlignment.Left,
-        PlaceholderText = "Paste server ID or link URL...",
-        PlaceholderColor3 = Themes.SubText,
-        Position = UDim2.fromOffset(8, 0),
-        Size = UDim2.new(1, -16, 1, 0),
-        ClearTextOnFocus = false,
-    })
-
-    input.FocusLost:Connect(function()
-        local v = input.Text
+window:AddInput(mainGB, "_VipServerID", {
+    Text = "Server ID / Link",
+    Description = "Paste PrivateServerId, JobId, or full PS link",
+    Default = VIP.ServerId or VIP.LinkCode or "",
+    Placeholder = "Paste here...",
+    Callback = function(v)
         if VIP.Mode == "ServerID" then
-            VIP.ServerId = v
+            VIP.ServerId = v or ""
             VIP.PlaceId = game.PlaceId
             VIP:Save()
         elseif VIP.Mode == "Link" then
@@ -201,177 +92,133 @@ function Lobby:Build()
                 VIP.LinkCode = code
                 VIP:Save()
             else
-                warn("[Lobby] Link parse failed:", code or pid)
+                window:Notify({
+                    Title = "VIP Server",
+                    Description = "Invalid link: " .. tostring(code or "parse failed"),
+                    Color = Themes.Danger,
+                })
             end
         end
-        refreshInfo()
-    end)
+    end,
+})
 
-    -- Buttons
-    local function makeBtn(text, y, color, cb)
-        local b = new("TextButton", {
-            Parent = main, BackgroundColor3 = color or Themes.ElementBg,
-            BorderSizePixel = 0, Text = text,
-            TextColor3 = Themes.Text, TextSize = 12,
-            Font = Enum.Font.Gotham,
-            Position = UDim2.fromOffset(12, y),
-            Size = UDim2.new(1, -24, 0, 28),
-        })
-        new("UICorner", { CornerRadius = UDim.new(0, 4), Parent = b })
-        new("UIStroke", { Color = Themes.ElementStroke,
-            ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = b })
-        b.MouseButton1Click:Connect(cb)
-        return b
-    end
-
-    makeBtn("Capture Current Server", 174, Themes.ElementBg, function()
-        local ok = VIP:CaptureCurrent()
-        if ok then
-            input.Text = ""
-            refreshInfo()
-        end
-    end)
-
-    makeBtn("Join VIP Now", 210, Themes.Accent, function()
+window:AddButton(mainGB, {
+    Text = "Join VIP Now",
+    Color = Themes.Accent,
+    Func = function()
         local ok, err = VIP:Join()
-        if not ok then warn("[Lobby] Join failed:", err) end
-    end)
+        if ok then
+            window:Notify({
+                Title = "VIP Server",
+                Description = "Teleporting to VIP...",
+                Color = Themes.Success,
+            })
+        else
+            window:Notify({
+                Title = "VIP Server",
+                Description = "Join failed: " .. tostring(err),
+                Color = Themes.Danger,
+            })
+        end
+    end,
+})
 
-    -- Auto toggles
-    local autoJoin = new("TextButton", {
-        Parent = main, BackgroundTransparency = 1,
-        Text = (VIP.AutoJoinOnStart and "[X] " or "[ ] ") .. "Auto-join on startup",
-        TextColor3 = Themes.Text, TextSize = 12,
-        Font = Enum.Font.Gotham,
-        TextXAlignment = Enum.TextXAlignment.Left,
-        Position = UDim2.fromOffset(12, 250),
-        Size = UDim2.new(1, -24, 0, 20),
-    })
-    autoJoin.MouseButton1Click:Connect(function()
-        VIP.AutoJoinOnStart = not VIP.AutoJoinOnStart
-        autoJoin.Text = (VIP.AutoJoinOnStart and "[X] " or "[ ] ") .. "Auto-join on startup"
+-- ============ Auto behaviors ============
+local autoGB = window:AddGroupbox(vipTab, "Auto Behaviors")
+
+window:AddToggle(autoGB, "_VipAutoJoin", {
+    Text = "Auto-Join on Startup",
+    Description = "Join the VIP server automatically when script loads",
+    Default = VIP.AutoJoinOnStart,
+    Callback = function(on)
+        VIP.AutoJoinOnStart = on and true or false
         VIP:Save()
-    end)
+    end,
+})
 
-    local autoRejoin = new("TextButton", {
-        Parent = main, BackgroundTransparency = 1,
-        Text = (VIP.AutoRejoinOnKick and "[X] " or "[ ] ") .. "Auto-rejoin on kick",
-        TextColor3 = Themes.Text, TextSize = 12,
-        Font = Enum.Font.Gotham,
-        TextXAlignment = Enum.TextXAlignment.Left,
-        Position = UDim2.fromOffset(12, 274),
-        Size = UDim2.new(1, -24, 0, 20),
-    })
-    autoRejoin.MouseButton1Click:Connect(function()
-        VIP.AutoRejoinOnKick = not VIP.AutoRejoinOnKick
-        autoRejoin.Text = (VIP.AutoRejoinOnKick and "[X] " or "[ ] ") .. "Auto-rejoin on kick"
-        if VIP.AutoRejoinOnKick then VIP:StartAutoRejoin() else VIP:StopAutoRejoin() end
+window:AddToggle(autoGB, "_VipAutoRejoin", {
+    Text = "Auto-Rejoin on Kick",
+    Description = "Rejoin the VIP server if disconnected",
+    Default = VIP.AutoRejoinOnKick,
+    Callback = function(on)
+        VIP.AutoRejoinOnKick = on and true or false
+        if on then
+            VIP:StartAutoRejoin()
+        else
+            VIP:StopAutoRejoin()
+        end
         VIP:Save()
-    end)
+    end,
+})
 
-    -- Mode hint
-    local hint = makeLabel(main, "", 10, UDim2.fromOffset(12, 302), Themes.SubText)
-    hint.Size = UDim2.new(1, -24, 0, 60)
-    hint.TextWrapped = true
-    hint.TextYAlignment = Enum.TextYAlignment.Top
+-- ============ Status ============
+local statusGB = window:AddGroupbox(vipTab, "Status")
 
-    local function updateHint()
-        if VIP.Mode == "MyPS" then
-            hint.Text = "Join your own private server. Click 'Capture Current Server' while you are inside your PS."
-        elseif VIP.Mode == "ServerID" then
-            hint.Text = "Paste your PrivateServerId or JobId above. PlaceId uses current game."
-        elseif VIP.Mode == "Link" then
-            hint.Text = "Paste full URL: roblox.com/games/.../...?privateServerLinkCode=XXX"
-        end
-    end
-
-    -- Toggle buttons
-    local function updateModeUI()
-        refreshInfo()
-        updateHint()
-    end
-
-    for _, btn in pairs(modeButtons) do
-        local old = btn.MouseButton1Click
-        btn.MouseButton1Click:Connect(updateModeUI)
-    end
-
-    updateModeUI()
-
-    -- Dismiss / Confirm
-    local dismiss = makeBtn("Dismiss", 380, Themes.ElementBg, function()
-        main.Visible = false
-    end)
-    dismiss.Size = UDim2.new(0.45, -14, 0, 30)
-    dismiss.Position = UDim2.fromOffset(12, 380)
-
-    local confirm = makeBtn("Confirm & Start", 380, Themes.Success, function()
-        VIP:Save()
-        if VIP.AutoJoinOnStart and VIP.Enabled then
-            VIP:Join()
-        end
-        main.Visible = false
-    end)
-    confirm.Size = UDim2.new(0.45, -14, 0, 30)
-    confirm.Position = UDim2.new(0.5, 2, 0, 380)
-
-    -- Draggable
-    local dragging, dragStart, startPos = false, nil, nil
-    top.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1
-            or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = true
-            dragStart = input.Position
-            startPos = main.Position
-        end
-    end)
-    UIS.InputChanged:Connect(function(input)
-        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
-            or input.UserInputType == Enum.UserInputType.Touch) then
-            local d = input.Position - dragStart
-            main.Position = UDim2.new(
-                startPos.X.Scale, startPos.X.Offset + d.X,
-                startPos.Y.Scale, startPos.Y.Offset + d.Y)
-        end
-    end)
-    UIS.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1
-            or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = false
-        end
-    end)
-
-    self.Window = sg
-    self.Main = main
-    self._refresh = refreshInfo
+local function refreshStatus()
+    local lines = {}
+    table.insert(lines, "PlaceId: " .. tostring(VIP.PlaceId))
+    table.insert(lines, "ServerId: " .. tostring(VIP.ServerId ~= "" and VIP.ServerId:sub(1, 24) or "N/A"))
+    table.insert(lines, "OwnerId: " .. tostring(VIP.OwnerId))
+    table.insert(lines, "Mode: " .. tostring(VIP.Mode))
+    table.insert(lines, "Enabled: " .. tostring(VIP.Enabled))
+    return table.concat(lines, "   |   ")
 end
 
-function Lobby:Show()
-    self:Build()
-    if self.Main then self.Main.Visible = true end
-    if self._refresh then self._refresh() end
-end
+window:AddInput(statusGB, "_VipStatusDummy", {
+    Text = "Info",
+    Default = refreshStatus(),
+    Placeholder = "",
+    Callback = function() end,
+})
 
-function Lobby:Hide()
-    if self.Main then self.Main.Visible = false end
-end
+window:AddButton(statusGB, {
+    Text = "Refresh Status",
+    Func = function()
+        local d = window.Options and window.Options._VipStatusDummy
+        if d and d.SetValue then d:SetValue(refreshStatus(), true) end
+        window:Notify({ Title = "VIP", Description = "Status refreshed", Color = Themes.Success })
+    end,
+})
 
-function Lobby:AutoStart()
-    local firstTime = not wasShownBefore()
-    if firstTime then
-        task.wait(2)
-        self:Show()
-        markShown()
+-- ============ First-launch auto flow ============
+local SHOW_FLAG = "ToRungHub/lobby_shown.txt"
+local firstLaunch = true
+if not isfolder("ToRungHub") then makefolder("ToRungHub") end
+if isfile(SHOW_FLAG) then firstLaunch = false end
+
+task.spawn(function()
+    task.wait(2)
+    if firstLaunch then
+        -- Switch to VIP tab + notify
+        for _, tab in ipairs(window.Tabs) do
+            if tab.Name == "VIP Server" then
+                -- emulate tab click via visible switch
+                if window.ActiveTab and window.ActiveTab.Button then
+                    window.ActiveTab.Page.Visible = false
+                end
+                window.ActiveTab = tab
+                tab.Page.Visible = true
+                if tab.Button then
+                    tab.Button.TextColor3 = Themes.AccentText
+                    tab.Button.BackgroundColor3 = Themes.ElementBg
+                end
+                break
+            end
+        end
+        pcall(function() writefile(SHOW_FLAG, "1") end)
+        window:Notify({
+            Title = "Welcome to ToRung HUB",
+            Description = "Configure your VIP server in this tab if needed.",
+            Color = Themes.Accent,
+            Duration = 8,
+        })
     elseif VIP.AutoJoinOnStart and VIP.Enabled then
-        task.wait(3)
+        task.wait(1)
         VIP:Join()
     end
     if VIP.AutoRejoinOnKick then
         VIP:StartAutoRejoin()
     end
-end
+end)
 
-S2.Lobby = Lobby
-task.spawn(function() Lobby:AutoStart() end)
-
-print("[ToRung/Lobby] ready")
+print("[ToRung/Lobby] VIP tab added to main HUD")
