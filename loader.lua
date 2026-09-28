@@ -37,18 +37,38 @@ local function fetch(url)
     return nil
 end
 
+local failed = {}
 for _, f in ipairs(files) do
     print("[ToRung] loading: " .. f)
     local url = BASE .. f .. CACHE_BUST
     local code = fetch(url)
-    if not code then warn("[ToRung] fetch failed: " .. f); return end
-    if not (code:find("local") or code:find("function") or code:find("return")) then
-        warn("[ToRung] not Lua: " .. f); return
+    if not code then
+        warn("[ToRung] FETCH FAILED: " .. f)
+        table.insert(failed, f .. " (fetch)")
+    else
+        if not (code:find("local") or code:find("function") or code:find("return")) then
+            warn("[ToRung] NOT LUA: " .. f)
+            table.insert(failed, f .. " (not lua)")
+        else
+            local fn, err = loadstring(code, "@" .. f)
+            if not fn then
+                warn("[ToRung] COMPILE ERR " .. f .. ": " .. tostring(err))
+                table.insert(failed, f .. " (compile)")
+            else
+                local ok, rerr = pcall(fn)
+                if not ok then
+                    warn("[ToRung] RUNTIME ERR " .. f .. ": " .. tostring(rerr))
+                    table.insert(failed, f .. " (runtime)")
+                end
+            end
+        end
     end
-    local fn, err = loadstring(code, "@" .. f)
-    if not fn then warn("[ToRung] compile err " .. f .. ": " .. tostring(err)); return end
-    local ok, rerr = pcall(fn)
-    if not ok then warn("[ToRung] runtime err " .. f .. ": " .. tostring(rerr)); return end
-    task.wait(0.4)
+    task.wait(0.3)
 end
-print("[ToRung] ALL DONE")
+
+if #failed > 0 then
+    warn("[ToRung] FAILED FILES:")
+    for _, f in ipairs(failed) do warn("  - " .. f) end
+else
+    print("[ToRung] ALL DONE (" .. #files .. " files)")
+end
