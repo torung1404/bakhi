@@ -949,7 +949,12 @@ function Mastery:Run(tok)
         local hum = cur:FindFirstChildOfClass("Humanoid")
         if not cr or not hum or hum.Health <= 0 then cur = nil; task.wait(0.25); continue end
 
-        local cfg = { Mode = self.Mode, Distance = self.Distance, OffsetX = self.OffX, OffsetY = self.OffY, OffsetZ = self.OffZ }
+        -- ✅ FIX: Below + Distance >= 8 → auto switch to "Far" (đứng xa ngang)
+        local effectiveMode = self.Mode
+        if self.Mode == "Below" and self.Distance >= 8 then
+            effectiveMode = "Far"
+        end
+        local cfg = { Mode = effectiveMode, Distance = self.Distance, OffsetX = self.OffX, OffsetY = self.OffY, OffsetZ = self.OffZ }
         r.CFrame = CFrame.lookAt(Movement:FarmPosition(cr, cfg), cr.Position)
         r.AssemblyLinearVelocity = Vector3.zero
 
