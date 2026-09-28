@@ -364,4 +364,4 @@ task.spawn(function()
     log("[Crow] UI added | default slot = 5")
 end)
 
-print("[ToRung/CROW] Delta-ready loaded")
+print("[ToRung/CROW] v2.0 | Items_Config mode")
