@@ -7,7 +7,7 @@ local files = {
     "webhook.lua", "config.lua", "extras.lua", "ui_extras.lua",
     "performance.lua", "ui_perf.lua",
     "vip.lua", "lobby.lua",
-    "crowquest.lua",
+    "crow.lua",
 }
 local CACHE_BUST = "?t=" .. tostring(math.floor(os.time()))
 
