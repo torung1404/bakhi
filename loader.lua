@@ -2,10 +2,12 @@
 local REPO = "torung1404/bakhi/main"
 local BASE = "https://raw.githubusercontent.com/" .. REPO .. "/"
 local files = {
+    "cleanup.lua",   -- ← PHẢI đứng đầu
     "core.lua", "features.lua", "ui.lua",
     "webhook.lua", "config.lua", "extras.lua", "ui_extras.lua",
     "performance.lua", "ui_perf.lua",
     "vip.lua", "lobby.lua",
+    "crowquest.lua",
 }
 local CACHE_BUST = "?t=" .. tostring(math.floor(os.time()))
 
@@ -46,21 +48,19 @@ for _, f in ipairs(files) do
     if not code then
         warn("[ToRung] FETCH FAILED: " .. f)
         table.insert(failed, f .. " (fetch)")
+    elseif not (code:find("local") or code:find("function") or code:find("return")) then
+        warn("[ToRung] NOT LUA: " .. f)
+        table.insert(failed, f .. " (not lua)")
     else
-        if not (code:find("local") or code:find("function") or code:find("return")) then
-            warn("[ToRung] NOT LUA: " .. f)
-            table.insert(failed, f .. " (not lua)")
+        local fn, err = loadstring(code, "@" .. f)
+        if not fn then
+            warn("[ToRung] COMPILE ERR " .. f .. ": " .. tostring(err))
+            table.insert(failed, f .. " (compile)")
         else
-            local fn, err = loadstring(code, "@" .. f)
-            if not fn then
-                warn("[ToRung] COMPILE ERR " .. f .. ": " .. tostring(err))
-                table.insert(failed, f .. " (compile)")
-            else
-                local ok, rerr = pcall(fn)
-                if not ok then
-                    warn("[ToRung] RUNTIME ERR " .. f .. ": " .. tostring(rerr))
-                    table.insert(failed, f .. " (runtime)")
-                end
+            local ok, rerr = pcall(fn)
+            if not ok then
+                warn("[ToRung] RUNTIME ERR " .. f .. ": " .. tostring(rerr))
+                table.insert(failed, f .. " (runtime)")
             end
         end
     end
