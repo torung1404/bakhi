@@ -1,4 +1,4 @@
--- crowquest.lua - Crow Quest v5 (added mouse click for summon)
+-- crowquest.lua - Crow Quest v6 (longer wait + multi-click)
 local S2 = getgenv().S2
 if not S2 or not S2.Core then return warn("[Crow] core missing") end
 if not S2.Features then return warn("[Crow] features missing") end
@@ -71,29 +71,39 @@ local function pressSlot(slot)
     log("[Crow] pressed slot " .. slot)
 end
 
--- FIX: thêm mouse click sau keypress
+-- Multi-click summon
 local function summonCrow(slot)
     pressSlot(slot)
-    task.wait(0.5)
-
-    pcall(function()
-        if setrobloxinput then setrobloxinput(true) end
-        if mouse1click then
-            mouse1click()
-        elseif mouse1press and mouse1release then
-            mouse1press()
-            task.wait(0.06)
-            mouse1release()
-        else
-            local vu = game:GetService("VirtualUser")
-            local cam = workspace.CurrentCamera
-            vu:CaptureController()
-            vu:ClickButton1(Vector2.new(cam.ViewportSize.X * 0.5, cam.ViewportSize.Y * 0.5))
-            vu:ReleaseController()
-        end
-    end)
-    log("[Crow] clicked to summon")
     task.wait(0.6)
+
+    local cam = workspace.CurrentCamera
+    local vs = cam and cam.ViewportSize or Vector2.new(1280, 720)
+    local positions = {
+        Vector2.new(vs.X * 0.5, vs.Y * 0.5),         -- center
+        Vector2.new(vs.X * 0.5, vs.Y * 0.6),         -- below center
+        Vector2.new(vs.X * 0.5, vs.Y * 0.4),         -- above center
+    }
+
+    for i, p in ipairs(positions) do
+        pcall(function()
+            if setrobloxinput then setrobloxinput(true) end
+            if mouse1click then
+                mouse1click()
+            elseif mouse1press and mouse1release then
+                mouse1press()
+                task.wait(0.06)
+                mouse1release()
+            else
+                local vu = game:GetService("VirtualUser")
+                vu:CaptureController()
+                vu:ClickButton1(p)
+                vu:ReleaseController()
+            end
+        end)
+        log("[Crow] clicked at " .. math.floor(p.X) .. "," .. math.floor(p.Y))
+        task.wait(0.5)
+    end
+    task.wait(0.4)
 end
 
 -- ============ Menu scanner ============
@@ -223,8 +233,8 @@ local function waitFor(tok, pred, timeout)
     while tok.Active and Runtime.Alive and t < timeout do
         local ok, r = pcall(pred)
         if ok and r then return true end
-        task.wait(0.2)
-        t = t + 0.2
+        task.wait(0.25)
+        t = t + 0.25
     end
     return false
 end
@@ -278,18 +288,25 @@ function CrowQuest:Run(tok)
             continue
         end
 
-        -- FIX: dùng summonCrow (keypress + click)
-        log("[Crow] summoning crow (slot " .. tostring(cfg.CrowSlot) .. ")")
-        summonCrow(cfg.CrowSlot)
+        -- Summon crow with retry
+        local gotMenu = false
+        for attempt = 1, 3 do
+            log("[Crow] summon attempt " .. attempt .. " (slot " .. tostring(cfg.CrowSlot) .. ")")
+            summonCrow(cfg.CrowSlot)
 
-        local gotMenu = waitFor(tok, function()
-            return #self:ScanMenu() > 0
-        end, 8)
+            gotMenu = waitFor(tok, function()
+                return #self:ScanMenu() > 0
+            end, 12)
+
+            if gotMenu then break end
+            log("[Crow] attempt " .. attempt .. " failed")
+            task.wait(1.5)
+        end
 
         if not gotMenu then
-            log("[Crow] no menu, retry")
+            log("[Crow] menu never opened after 3 attempts, wait 10s")
             pressSlot(cfg.WeaponSlot)
-            task.wait(retry)
+            task.wait(10)
             continue
         end
 
@@ -309,11 +326,11 @@ function CrowQuest:Run(tok)
 
         log("[Crow] picking: " .. best.Boss.name .. " (Exp=" .. best.Exp .. ")")
         clickMission(best)
-        task.wait(0.8)
+        task.wait(1)
 
         local gotQuest = waitFor(tok, function()
             return getActiveQuestBoss() ~= nil
-        end, 10)
+        end, 12)
 
         if not gotQuest then
             log("[Crow] quest didn't register, retry")
@@ -335,7 +352,6 @@ function CrowQuest:Run(tok)
         if cfg.AutoLootBoss and self.CollectLoot then
             pcall(function() self:CollectLoot(target.cf.Position, 200) end)
         end
-
         task.wait(retry)
     end
 end
@@ -383,4 +399,4 @@ task.spawn(function()
     log("[Crow] UI settings added")
 end)
 
-print("[ToRung/CROW] v5 loaded")
+print("[ToRung/CROW] v6 loaded")
