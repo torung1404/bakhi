@@ -12,7 +12,6 @@ local Extras = S2.Extras
 local Themes = S2.UI.Themes
 if not window then return warn("[UIX] no window") end
 
--- Rename title
 pcall(function()
     if window.TopBar then
         for _, c in ipairs(window.TopBar:GetChildren()) do
@@ -24,7 +23,6 @@ pcall(function()
     end
 end)
 
--- ============ WEBHOOK TAB ============
 local hookTab = window:AddTab("Webhook")
 local hookGB = window:AddGroupbox(hookTab, "Discord Webhook")
 
@@ -51,7 +49,7 @@ window:AddButton(hookGB, {
     Text = "Test Webhook",
     Func = function()
         Webhook:Test()
-        window:Notify({ Title = "Webhook", Description = "Test sent - check Discord", Color = Themes.Success })
+        window:Notify({ Title = "Webhook", Description = "Test sent", Color = Themes.Success })
     end,
 })
 
@@ -82,7 +80,6 @@ window:AddToggle(evGB, "_WhSoul", {
     Callback = function(on) Webhook.Events.SoulGrabbed = on; Webhook:Save() end,
 })
 
--- ============ CONFIG TAB ============
 local cfgTab = window:AddTab("Config")
 local cfgGB = window:AddGroupbox(cfgTab, "Save / Load")
 
@@ -180,7 +177,6 @@ window:AddButton(autoGB, {
     end,
 })
 
--- ============ EXTRAS TAB ============
 local extTab = window:AddTab("Extras")
 local guardGB = window:AddGroupbox(extTab, "Health Guard")
 
@@ -251,7 +247,6 @@ window:AddToggle(trainGB, "_TrainEnabled", {
     end,
 })
 
--- ============ AUTO-LOAD ON STARTUP ============
 task.spawn(function()
     task.wait(3)
     local name = Config:GetAutoLoad()
