@@ -1,4 +1,4 @@
--- crow.lua - Crow Quest for Delta (Roblox API only)
+-- crow.lua - Crow Quest for Delta (uses Items_Config.Equipped)
 local S2 = getgenv().S2
 if not S2 or not S2.Core then return warn("[Crow] core missing") end
 if not S2.Features then return warn("[Crow] features missing") end
@@ -9,7 +9,6 @@ local Combat = S2.Core.Combat
 local log = S2.Core.log
 
 local Players = game:GetService("Players")
-local UIS = game:GetService("UserInputService")
 local LP = Players.LocalPlayer
 
 local CrowQuest = S2.Features.CrowQuest
@@ -61,109 +60,38 @@ local function getActiveQuestBoss()
     return nil
 end
 
--- ============ ROBLOX-ONLY Input ============
-local VirtualUser = game:GetService("VirtualUser")
-
--- Click at screen position using VirtualUser (works on Delta)
-local function clickScreen(x, y)
-    pcall(function()
-        VirtualUser:CaptureController()
-        VirtualUser:ClickButton1(Vector2.new(x, y))
-        VirtualUser:ReleaseController()
-    end)
-end
-
--- Find hotbar button for a given slot (1-5)
-local function getHotbarButton(slotNum)
-    local pg = LP:FindFirstChild("PlayerGui")
-    if not pg then return nil end
-
-    -- Common hotbar paths in Slayers 2
-    local candidates = {
-        pg:FindFirstChild("Hotbar"),
-        pg:FindFirstChild("ComponentsHolder") and pg.ComponentsHolder:FindFirstChild("Hotbar"),
-        pg:FindFirstChild("BackpackGui"),
-    }
-
-    -- Also scan deeper for frame named "Slot1".."Slot5" or "Hotbar"
-    local function findIn(root)
-        if not root then return nil end
-        for _, d in ipairs(root:GetDescendants()) do
-            local n = d.Name
-            if n == "Slot" .. slotNum
-               or n == "Slot_" .. slotNum
-               or n == "Toolbar" .. slotNum
-               or n == "Item" .. slotNum then
-                if d:IsA("TextButton") or d:IsA("ImageButton") then
-                    return d
-                end
-                for _, c in ipairs(d:GetChildren()) do
-                    if c:IsA("TextButton") or c:IsA("ImageButton") then
-                        return c
-                    end
-                end
-            end
-        end
-        return nil
-    end
-
-    for _, root in ipairs(candidates) do
-        if root then
-            local btn = findIn(root)
-            if btn then return btn end
-        end
-    end
-
-    -- Fallback: scan whole PlayerGui
-    local btn = findIn(pg)
-    return btn
-end
-
--- Equip slot by tapping hotbar button
+-- ============ EQUIP via Items_Config (source style) ============
 local function equipSlot(slotNum)
     slotNum = math.clamp(tonumber(slotNum) or 1, 1, 5)
-
-    local btn = getHotbarButton(slotNum)
-    if btn then
-        local ap = btn.AbsolutePosition
-        local as = btn.AbsoluteSize
-        if ap and as then
-            local cx = ap.X + as.X * 0.5
-            local cy = ap.Y + as.Y * 0.5
-            clickScreen(cx, cy)
-            log("[Crow] tapped hotbar slot " .. slotNum .. " at " .. math.floor(cx) .. "," .. math.floor(cy))
-            task.wait(0.4)
-            return true
-        end
-    end
-
-    -- Fallback: try firekey via UserInputService (works only if Delta hooks UIS)
-    pcall(function()
-        local keyCode = Enum.KeyCode["One"]
-        local keys = {
-            Enum.KeyCode.One, Enum.KeyCode.Two, Enum.KeyCode.Three,
-            Enum.KeyCode.Four, Enum.KeyCode.Five
-        }
-        local kc = keys[slotNum]
-        if kc then
-            UIS:SetKeyThrottleEnabled(kc, false)
-            -- not reliable but try
+    local ok = pcall(function()
+        local items = LP:FindFirstChild("Items_Config")
+        if items and items:FindFirstChild("Equipped") then
+            items.Equipped.Value = slotNum
         end
     end)
-
-    log("[Crow] couldn't find hotbar slot " .. slotNum)
-    return false
+    if ok then
+        log("[Crow] equipped slot " .. slotNum)
+    else
+        log("[Crow] equip failed slot " .. slotNum)
+    end
+    task.wait(0.5)
+    return ok
 end
 
 -- Summon crow: equip crow + click chuột giữa màn hình
 local function summonCrow(slotNum)
     equipSlot(slotNum)
-    task.wait(0.6)
+    task.wait(0.5)
 
     -- Click giữa màn hình để triệu hồi quạ
+    local vu = game:GetService("VirtualUser")
     local cam = workspace.CurrentCamera
     local vs = cam and cam.ViewportSize or Vector2.new(1280, 720)
-    clickScreen(vs.X * 0.5, vs.Y * 0.5)
+    pcall(function()
+        vu:CaptureController()
+        vu:ClickButton1(Vector2.new(vs.X * 0.5, vs.Y * 0.5))
+        vu:ReleaseController()
+    end)
     log("[Crow] clicked center to summon")
     task.wait(0.8)
 end
@@ -247,15 +175,20 @@ function CrowQuest:PickBestMission(choices)
     return sorted[1]
 end
 
--- Click mission (Roblox-only)
+-- Click mission (firesignal + VirtualUser fallback)
 local function clickMission(choice)
-    -- Primary: VirtualUser click
-    clickScreen(choice.X, choice.Y)
-
-    -- Backup: firesignal (Delta has this)
+    -- firesignal first (works best on Delta)
     if choice.Button and firesignal then
         pcall(firesignal, choice.Button.MouseButton1Click)
     end
+
+    -- VirtualUser fallback
+    pcall(function()
+        local vu = game:GetService("VirtualUser")
+        vu:CaptureController()
+        vu:ClickButton1(Vector2.new(choice.X, choice.Y))
+        vu:ReleaseController()
+    end)
 
     log("[Crow] clicked mission at " .. math.floor(choice.X) .. "," .. math.floor(choice.Y))
 end
@@ -428,7 +361,7 @@ task.spawn(function()
         Default = false,
         Callback = function(on) CrowQuest.Cfg.AutoLootBoss = on end,
     })
-    log("[Crow] UI added")
+    log("[Crow] UI added | default slot = 5")
 end)
 
 print("[ToRung/CROW] Delta-ready loaded")
