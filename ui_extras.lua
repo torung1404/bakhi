@@ -1,25 +1,23 @@
--- ui_extras.lua - Webhook panel, Config panel, ToRung branding
+-- ui_extras.lua - Webhook, Config, Extras tabs + ToRung branding
 local S2 = getgenv().S2
-if not S2 or not S2.UI then return warn("[ToRung/UIX] UI chưa chạy") end
-if not S2.Webhook then return warn("[ToRung/UIX] Webhook chưa chạy") end
-if not S2.Config then return warn("[ToRung/UIX] Config chưa chạy") end
-if not S2.Extras then return warn("[ToRung/UIX] Extras chưa chạy") end
+if not S2 or not S2.UI then return warn("[UIX] UI missing") end
+if not S2.Webhook then return warn("[UIX] Webhook missing") end
+if not S2.Config then return warn("[UIX] Config missing") end
+if not S2.Extras then return warn("[UIX] Extras missing") end
 
 local window = S2.UI.Window
 local Webhook = S2.Webhook
 local Config = S2.Config
 local Extras = S2.Extras
 local Themes = S2.UI.Themes
+if not window then return warn("[UIX] no window") end
 
-if not window then return warn("[ToRung/UIX] no window") end
-
--- Rename title (branding)
+-- Rename title
 pcall(function()
-    local topBar = window.TopBar
-    if topBar then
-        for _, child in ipairs(topBar:GetChildren()) do
-            if child:IsA("TextLabel") then
-                child.Text = "ToRung HUB  |  v1.0"
+    if window.TopBar then
+        for _, c in ipairs(window.TopBar:GetChildren()) do
+            if c:IsA("TextLabel") then
+                c.Text = "ToRung HUB  |  v1.0"
                 break
             end
         end
@@ -35,7 +33,7 @@ window:AddInput(hookGB, "_WhUrl", {
     Default = Webhook.URL,
     Placeholder = "https://discord.com/api/webhooks/...",
     Callback = function(v)
-        Webhook.URL = v
+        Webhook.URL = v or ""
         Webhook:Save()
     end,
 })
@@ -44,7 +42,7 @@ window:AddToggle(hookGB, "_WhEnabled", {
     Text = "Enable Webhook",
     Default = Webhook.Enabled,
     Callback = function(on)
-        Webhook.Enabled = on
+        Webhook.Enabled = on and true or false
         Webhook:Save()
     end,
 })
@@ -57,41 +55,30 @@ window:AddButton(hookGB, {
     end,
 })
 
-local eventsGB = window:AddGroupbox(hookTab, "Notify Events")
+local evGB = window:AddGroupbox(hookTab, "Notify Events")
 
-window:AddToggle(eventsGB, "_WhBossKill", {
-    Text = "Boss Killed",
-    Default = Webhook.Events.BossKilled,
+window:AddToggle(evGB, "_WhBossKill", {
+    Text = "Boss Killed", Default = Webhook.Events.BossKilled,
     Callback = function(on) Webhook.Events.BossKilled = on; Webhook:Save() end,
 })
-
-window:AddToggle(eventsGB, "_WhQuest", {
-    Text = "Quest Accepted",
-    Default = Webhook.Events.QuestAccepted,
+window:AddToggle(evGB, "_WhQuest", {
+    Text = "Quest Accepted", Default = Webhook.Events.QuestAccepted,
     Callback = function(on) Webhook.Events.QuestAccepted = on; Webhook:Save() end,
 })
-
-window:AddToggle(eventsGB, "_WhItem", {
-    Text = "Item Drop",
-    Default = Webhook.Events.ItemDrop,
+window:AddToggle(evGB, "_WhItem", {
+    Text = "Item Drop", Default = Webhook.Events.ItemDrop,
     Callback = function(on) Webhook.Events.ItemDrop = on; Webhook:Save() end,
 })
-
-window:AddToggle(eventsGB, "_WhError", {
-    Text = "Errors",
-    Default = Webhook.Events.Error,
+window:AddToggle(evGB, "_WhError", {
+    Text = "Errors", Default = Webhook.Events.Error,
     Callback = function(on) Webhook.Events.Error = on; Webhook:Save() end,
 })
-
-window:AddToggle(eventsGB, "_WhFish", {
-    Text = "Fish Caught",
-    Default = Webhook.Events.FishCaught,
+window:AddToggle(evGB, "_WhFish", {
+    Text = "Fish Caught", Default = Webhook.Events.FishCaught,
     Callback = function(on) Webhook.Events.FishCaught = on; Webhook:Save() end,
 })
-
-window:AddToggle(eventsGB, "_WhSoul", {
-    Text = "Soul Grabbed",
-    Default = Webhook.Events.SoulGrabbed,
+window:AddToggle(evGB, "_WhSoul", {
+    Text = "Soul Grabbed", Default = Webhook.Events.SoulGrabbed,
     Callback = function(on) Webhook.Events.SoulGrabbed = on; Webhook:Save() end,
 })
 
@@ -105,8 +92,7 @@ window:AddInput(cfgGB, "_CfgName", {
     Placeholder = "my_config",
 })
 
-local cfgDropdown
-cfgDropdown = window:AddDropdown(cfgGB, "_CfgList", {
+local cfgDropdown = window:AddDropdown(cfgGB, "_CfgList", {
     Text = "Saved Configs",
     Values = Config:List(),
     Default = nil,
@@ -168,7 +154,6 @@ window:AddButton(cfgGB, {
     end,
 })
 
--- Auto-load
 local autoGB = window:AddGroupbox(cfgTab, "Auto-Load on Startup")
 
 window:AddInput(autoGB, "_CfgAutoName", {
@@ -190,7 +175,7 @@ window:AddButton(autoGB, {
     Text = "Clear Auto-Load",
     Func = function()
         Config:SetAutoLoad("")
-        window:Flags._CfgAutoName = ""
+        if window.Flags then window.Flags._CfgAutoName = "" end
         window:Notify({ Title = "Auto-Load", Description = "Cleared", Color = Themes.Success })
     end,
 })
