@@ -1,4 +1,4 @@
--- crow.lua - Crow Quest for Delta (uses Items_Config.Equipped)
+-- crow.lua - Crow Quest v3 (scan all + cooldown + no early weapon switch)
 local S2 = getgenv().S2
 if not S2 or not S2.Core then return warn("[Crow] core missing") end
 if not S2.Features then return warn("[Crow] features missing") end
@@ -20,6 +20,7 @@ CrowQuest.Cfg = {
     Priority = "HighestExp",
     MaxHuntLevel = 125,
     RetryDelay = 2.0,
+    CrowCooldown = 5.0,
     AutoLootBoss = false,
 }
 
@@ -60,7 +61,7 @@ local function getActiveQuestBoss()
     return nil
 end
 
--- ============ EQUIP via Items_Config (source style) ============
+-- ============ Equip slot via Items_Config ============
 local function equipSlot(slotNum)
     slotNum = math.clamp(tonumber(slotNum) or 1, 1, 5)
     local ok = pcall(function()
@@ -74,16 +75,11 @@ local function equipSlot(slotNum)
     else
         log("[Crow] equip failed slot " .. slotNum)
     end
-    task.wait(0.5)
     return ok
 end
 
--- Summon crow: equip crow + click chuột giữa màn hình
-local function summonCrow(slotNum)
-    equipSlot(slotNum)
-    task.wait(0.5)
-
-    -- Click giữa màn hình để triệu hồi quạ
+-- Click center of screen
+local function clickCenter()
     local vu = game:GetService("VirtualUser")
     local cam = workspace.CurrentCamera
     local vs = cam and cam.ViewportSize or Vector2.new(1280, 720)
@@ -92,55 +88,59 @@ local function summonCrow(slotNum)
         vu:ClickButton1(Vector2.new(vs.X * 0.5, vs.Y * 0.5))
         vu:ReleaseController()
     end)
-    log("[Crow] clicked center to summon")
-    task.wait(0.8)
 end
 
--- ============ Menu scanner ============
-local function getDialogueFrame()
-    local pg = LP:FindFirstChild("PlayerGui")
-    if not pg then return nil end
-    local holder = pg:FindFirstChild("ComponentsHolder")
-    if not holder then return nil end
-    return holder:FindFirstChild("DialogueFrame")
-end
-
+-- ============ NEW ScanMenu — search all PlayerGui ============
 function CrowQuest:ScanMenu()
-    local df = getDialogueFrame()
-    if not df then return {} end
-    local actual = df:FindFirstChild("Actual")
-    if not actual then return {} end
-    local bh = actual:FindFirstChild("ButtonHolder")
-    if not bh then return {} end
+    local pg = LP:FindFirstChild("PlayerGui")
+    if not pg then return {} end
 
     local choices = {}
-    for _, frame in ipairs(bh:GetChildren()) do
-        if not (frame:IsA("Frame") or frame:IsA("TextButton")) then continue end
+    local seen = {}
 
-        local bossName = nil
-        local fullText = ""
+    -- Search mọi TextLabel/TextButton có chữ "Defeat"
+    for _, d in ipairs(pg:GetDescendants()) do
+        if not (d:IsA("TextLabel") or d:IsA("TextButton")) then continue end
+        local txt = d.Text or ""
+        if not txt:find("Defeat", 1, true) then continue end
+        if not d.Visible then continue end
+
+        local bossName = findBossByText(txt)
+        if not bossName then continue end
+
+        -- Skip if invisible
+        local okV, vis = pcall(function() return d.Visible end)
+        if okV and not vis then continue end
+
+        -- Find container Frame (go up until size > 200x40)
+        local frame = d
+        for _ = 1, 6 do
+            if not frame or not frame.Parent then break end
+            frame = frame.Parent
+            if frame:IsA("Frame") then
+                local okS, sz = pcall(function() return frame.AbsoluteSize end)
+                if okS and sz and sz.X >= 200 and sz.Y >= 40 then break end
+            end
+        end
+        if not frame then continue end
+
+        -- Dedupe by boss + Y
+        local okP, ap = pcall(function() return d.AbsolutePosition end)
+        if not okP or not ap then continue end
+        local key = bossName.name .. "@" .. math.floor(ap.Y / 30)
+        if seen[key] then continue end
+        seen[key] = true
+
+        -- Parse exp/wen from container
         local allNums = {}
-
-        for _, d in ipairs(frame:GetDescendants()) do
-            if d:IsA("TextLabel") or d:IsA("TextButton") then
-                local txt = d.Text or ""
-                fullText = fullText .. " " .. txt
-                if not bossName and txt:find("Defeat", 1, true) then
-                    local b = findBossByText(txt)
-                    if b then bossName = b end
-                end
-                for numStr in txt:gmatch("([%d,]+)") do
+        for _, x in ipairs(frame:GetDescendants()) do
+            if x:IsA("TextLabel") or x:IsA("TextButton") then
+                for numStr in (x.Text or ""):gmatch("([%d,]+)") do
                     local n = tonumber(numStr:gsub(",", ""))
                     if n and n >= 100 then table.insert(allNums, n) end
                 end
             end
         end
-        if not bossName then
-            local b = findBossByText(fullText)
-            if b then bossName = b end
-        end
-        if not bossName then continue end
-
         table.sort(allNums, function(a, b) return a > b end)
         local exp, wen = 0, 0
         for _, n in ipairs(allNums) do
@@ -148,16 +148,27 @@ function CrowQuest:ScanMenu()
             elseif n >= 100 and n < 10000 and wen == 0 and n ~= exp then wen = n end
         end
 
-        local btn = frame:FindFirstChild("TextButton") or frame
-        local ap = btn.AbsolutePosition or Vector2.new(0, 0)
-        local as = btn.AbsoluteSize or Vector2.new(100, 30)
+        -- Find clickable button
+        local btn = d
+        for _ = 1, 6 do
+            if not btn then break end
+            if btn:IsA("TextButton") or btn:IsA("ImageButton") then break end
+            btn = btn.Parent
+        end
+        if not btn then btn = d end
+
+        local okB, bap = pcall(function() return btn.AbsolutePosition end)
+        local okBS, bas = pcall(function() return btn.AbsoluteSize end)
+        local bx = (okB and bap and bap.X or ap.X) + (okBS and bas and bas.X * 0.5 or 100)
+        local by = (okB and bap and bap.Y or ap.Y) + (okBS and bas and bas.Y * 0.5 or 20)
 
         table.insert(choices, {
             Boss = bossName, Exp = exp, Wen = wen,
             Button = btn, Frame = frame,
-            X = ap.X + as.X * 0.5, Y = ap.Y + as.Y * 0.5,
+            X = bx, Y = by,
         })
     end
+
     return choices
 end
 
@@ -175,22 +186,18 @@ function CrowQuest:PickBestMission(choices)
     return sorted[1]
 end
 
--- Click mission (firesignal + VirtualUser fallback)
+-- Click mission
 local function clickMission(choice)
-    -- firesignal first (works best on Delta)
     if choice.Button and firesignal then
         pcall(firesignal, choice.Button.MouseButton1Click)
     end
-
-    -- VirtualUser fallback
     pcall(function()
         local vu = game:GetService("VirtualUser")
         vu:CaptureController()
         vu:ClickButton1(Vector2.new(choice.X, choice.Y))
         vu:ReleaseController()
     end)
-
-    log("[Crow] clicked mission at " .. math.floor(choice.X) .. "," .. math.floor(choice.Y))
+    log("[Crow] clicked at " .. math.floor(choice.X) .. "," .. math.floor(choice.Y))
 end
 
 -- ============ Wait ============
@@ -205,7 +212,7 @@ local function waitFor(tok, pred, timeout)
     return false
 end
 
--- ============ Fight ============
+-- ============ Fight boss ============
 function CrowQuest:FightBoss(tok, boss)
     if boss.cf then
         GameAPI:Teleport(boss.cf + Vector3.new(0, 3, 0))
@@ -242,12 +249,15 @@ function CrowQuest:FightBoss(tok, boss)
     return false
 end
 
--- ============ Main ============
+-- ============ Main Run ============
 function CrowQuest:Run(tok)
     local cfg = self.Cfg
     local retry = tonumber(cfg.RetryDelay) or 2.0
+    local cooldown = tonumber(cfg.CrowCooldown) or 5.0
+    local lastCrowUse = -999
 
     while tok.Active and Runtime.Alive do
+        -- Phase 0: active quest?
         local existing = getActiveQuestBoss()
         if existing then
             log("[Crow] continuing quest: " .. existing.name)
@@ -256,25 +266,44 @@ function CrowQuest:Run(tok)
             continue
         end
 
-        if #self:ScanMenu() > 0 then
-            log("[Crow] menu already open")
-        else
-            log("[Crow] summoning crow (slot " .. tostring(cfg.CrowSlot) .. ")")
-            summonCrow(cfg.CrowSlot)
+        -- Phase 1: check if menu is already open
+        local choices = self:ScanMenu()
 
+        if #choices == 0 then
+            -- Need to summon crow
+            local now = os.clock()
+            local elapsed = now - lastCrowUse
+            if elapsed < cooldown then
+                local wait = cooldown - elapsed
+                log("[Crow] crow cooldown: " .. string.format("%.1f", wait) .. "s")
+                task.wait(wait)
+            end
+
+            log("[Crow] summoning crow (slot " .. tostring(cfg.CrowSlot) .. ")")
+            equipSlot(cfg.CrowSlot)
+            lastCrowUse = os.clock()
+            task.wait(0.5)
+
+            clickCenter()
+            log("[Crow] clicked center to summon")
+
+            -- Wait for menu to appear
             local gotMenu = waitFor(tok, function()
                 return #self:ScanMenu() > 0
-            end, 10)
+            end, 8)
 
             if not gotMenu then
-                log("[Crow] no menu, retry")
-                equipSlot(cfg.WeaponSlot)
+                log("[Crow] no menu after summon, retry")
                 task.wait(retry)
                 continue
             end
+
+            choices = self:ScanMenu()
+        else
+            log("[Crow] menu already open, " .. #choices .. " missions")
         end
 
-        local choices = self:ScanMenu()
+        -- Phase 2: log + pick best
         log("[Crow] scanned " .. #choices .. " missions")
         for _, c in ipairs(choices) do
             log("  -> " .. c.Boss.name .. " | Exp=" .. c.Exp .. " | Wen=" .. c.Wen)
@@ -283,7 +312,6 @@ function CrowQuest:Run(tok)
         local best = self:PickBestMission(choices)
         if not best then
             log("[Crow] no valid pick")
-            equipSlot(cfg.WeaponSlot)
             task.wait(retry)
             continue
         end
@@ -292,30 +320,34 @@ function CrowQuest:Run(tok)
         clickMission(best)
         task.wait(1)
 
+        -- Phase 3: wait for quest to be accepted
         local gotQuest = waitFor(tok, function()
             return getActiveQuestBoss() ~= nil
         end, 10)
 
         if not gotQuest then
-            log("[Crow] quest not registered, retry")
-            equipSlot(cfg.WeaponSlot)
+            log("[Crow] quest not registered, will retry (weapon unchanged)")
+            -- KHÔNG đổi weapon ở đây — giữ crow để thử lại
             task.wait(retry)
             continue
         end
 
+        -- Phase 4: quest accepted → NOW switch to weapon
         local actual = getActiveQuestBoss()
         local target = actual or best.Boss
-        log("[Crow] quest active: " .. target.name)
-
-        task.wait(0.4)
-        equipSlot(cfg.WeaponSlot)
+        log("[Crow] quest active: " .. target.name .. " — switching to weapon slot " .. tostring(cfg.WeaponSlot))
         task.wait(0.3)
+        equipSlot(cfg.WeaponSlot)
+        task.wait(0.4)
 
+        -- Phase 5: fight
         self:FightBoss(tok, target)
 
+        -- Phase 6: loot
         if cfg.AutoLootBoss and self.CollectLoot then
             pcall(function() self:CollectLoot(target.cf.Position, 200) end)
         end
+
         task.wait(retry)
     end
 end
@@ -356,12 +388,17 @@ task.spawn(function()
         Min = 0.5, Max = 10, Default = 2.0, Decimals = 1,
         Callback = function(v) CrowQuest.Cfg.RetryDelay = v end,
     })
+    window:AddSlider(crowGB, "_CrowCd", {
+        Text = "Crow Cooldown",
+        Min = 1, Max = 15, Default = 5.0, Decimals = 1,
+        Callback = function(v) CrowQuest.Cfg.CrowCooldown = v end,
+    })
     window:AddToggle(crowGB, "_CrowAutoLoot", {
         Text = "Auto Loot Boss",
         Default = false,
         Callback = function(on) CrowQuest.Cfg.AutoLootBoss = on end,
     })
-    log("[Crow] UI added | default slot = 5")
+    log("[Crow] UI added | slot=5 | cooldown=5s")
 end)
 
-print("[ToRung/CROW] v2.0 | Items_Config mode")
+print("[ToRung/CROW] v3.0 | scan-all + cooldown + safe-weapon-swap")
