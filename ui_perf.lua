@@ -1,25 +1,17 @@
--- ui_perf.lua - Performance tab
+-- ui_perf.lua - Performance tab (dedup)
 local S2 = getgenv().S2
 if not S2 or not S2.UI or not S2.Performance then
     return warn("[ui_perf] missing deps")
 end
-
--- ✅ DEDUP GUARD
-if S2._PerfTabAdded then
-    return warn("[ui_perf] already added, skip")
-end
+if S2._PerfTabAdded then return end
 S2._PerfTabAdded = true
 
 local window = S2.UI.Window
 local Perf = S2.Performance
 local Themes = S2.UI.Themes
 if not window then return end
-
--- Check if tab already exists
 for _, tab in ipairs(window.Tabs) do
-    if tab.Name == "Performance" then
-        return warn("[ui_perf] Performance tab already exists")
-    end
+    if tab.Name == "Performance" then return end
 end
 
 local perfTab = window:AddTab("Performance")
@@ -31,75 +23,46 @@ window:AddToggle(mainGB, "_PerfMaster", {
     Default = Perf.Master,
     Callback = function(on) Perf:SetMaster(on) end,
 })
-
 window:AddToggle(mainGB, "_PerfFB", {
-    Text = "FullBright",
-    Description = "Maximize lighting brightness",
-    Default = Perf.FullBright,
+    Text = "FullBright", Default = Perf.FullBright,
     Callback = function(on) Perf.FullBright = on; Perf:Apply(); Perf:Save() end,
 })
-
 window:AddToggle(mainGB, "_PerfFog", {
-    Text = "No Fog",
-    Description = "Remove all fog",
-    Default = Perf.NoFog,
+    Text = "No Fog", Default = Perf.NoFog,
     Callback = function(on) Perf.NoFog = on; Perf:Apply(); Perf:Save() end,
 })
-
 window:AddToggle(mainGB, "_PerfAtm", {
-    Text = "No Atmosphere",
-    Description = "Disable bloom, blur, sun rays",
-    Default = Perf.NoAtmosphere,
+    Text = "No Atmosphere", Default = Perf.NoAtmosphere,
     Callback = function(on) Perf.NoAtmosphere = on; Perf:Apply(); Perf:Save() end,
 })
-
 window:AddToggle(mainGB, "_PerfTime", {
-    Text = "Force Time of Day",
-    Description = "Lock in-game clock",
-    Default = Perf.ForceTime,
+    Text = "Force Time of Day", Default = Perf.ForceTime,
     Callback = function(on) Perf.ForceTime = on; Perf:Apply(); Perf:Save() end,
 })
-
 window:AddSlider(mainGB, "_PerfHour", {
-    Text = "Time (hour)",
-    Min = 0, Max = 24, Default = Perf.TimeOfDay,
+    Text = "Time (hour)", Min = 0, Max = 24, Default = Perf.TimeOfDay,
     Callback = function(v) Perf.TimeOfDay = v; Perf:Apply(); Perf:Save() end,
 })
-
 window:AddToggle(mainGB, "_PerfMap", {
-    Text = "Hide Map",
-    Description = "Make map parts invisible",
-    Default = Perf.HideMap,
+    Text = "Hide Map", Default = Perf.HideMap,
     Callback = function(on) Perf.HideMap = on; Perf:Apply(); Perf:Save() end,
 })
-
 window:AddToggle(mainGB, "_PerfOthers", {
-    Text = "Hide Other Players",
-    Description = "Invisible other players",
-    Default = Perf.HideOthers,
+    Text = "Hide Other Players", Default = Perf.HideOthers,
     Callback = function(on) Perf.HideOthers = on; Perf:Apply(); Perf:Save() end,
 })
-
 window:AddToggle(mainGB, "_PerfSelf", {
-    Text = "Hide Character",
-    Description = "Invisible yourself",
-    Default = Perf.HideSelf,
+    Text = "Hide Character", Default = Perf.HideSelf,
     Callback = function(on) Perf.HideSelf = on; Perf:Apply(); Perf:Save() end,
 })
-
 window:AddToggle(mainGB, "_Perf3D", {
-    Text = "No 3D Render",
-    Description = "Disable 3D rendering (UI only)",
-    Default = Perf.No3D,
+    Text = "No 3D Render", Default = Perf.No3D,
     Callback = function(on) Perf.No3D = on; Perf:Apply(); Perf:Save() end,
 })
-
 window:AddSlider(mainGB, "_PerfFPS", {
-    Text = "FPS Cap (0 = unlimited)",
-    Min = 0, Max = 360, Default = Perf.FPSCap,
+    Text = "FPS Cap (0 = unlimited)", Min = 0, Max = 360, Default = Perf.FPSCap,
     Callback = function(v) Perf.FPSCap = v; Perf:Apply(); Perf:Save() end,
 })
 
 if Perf.Master then Perf:Apply() end
-
 print("[ToRung/UI-PERF] tab added")
