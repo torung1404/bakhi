@@ -1,4 +1,4 @@
--- crow.lua - v4 (Delta only, keypress slot, debug-friendly)
+-- crow.lua - v5 (multi-pos click + debug + safe BossData)
 local S2 = getgenv().S2
 if not S2 or not S2.Core then return warn("[Crow] core missing") end
 if not S2.Features then return warn("[Crow] features missing") end
@@ -14,6 +14,27 @@ local VirtualInputManager = game:GetService("VirtualInputManager")
 
 local CrowQuest = S2.Features.CrowQuest
 if not CrowQuest then return warn("[Crow] no CrowQuest table") end
+
+-- ============ FIX 1: Fallback BossData nếu features.lua rỗng ============
+if not CrowQuest.BossData or #CrowQuest.BossData == 0 then
+    warn("[Crow] CrowQuest.BossData empty! Creating fallback...")
+    CrowQuest.BossData = {
+        { name = "Mother Bear", cf = CFrame.new(540,1121,-1024) },
+        { name = "Hoyuzo", cf = CFrame.new(746,1001,-1413) },
+        { name = "Soryu Trainee Goki", cf = CFrame.new(-427,288,543) },
+        { name = "Reaper Trainee Kuzan", cf = CFrame.new(-1220,1373,-3035) },
+        { name = "Datai", cf = CFrame.new(-166,1043,-1138) },
+        { name = "Domae", cf = CFrame.new(-297,1350,-3452) },
+        { name = "Sumari", cf = CFrame.new(396,1018,-621) },
+        { name = "Yahari", cf = CFrame.new(825,1019,-642) },
+        { name = "Enru", cf = CFrame.new(821,800,543) },
+        { name = "Nezura", cf = CFrame.new(-1460,275,935) },
+        { name = "Gyutai", cf = CFrame.new(-267,1043,-1140) },
+        { name = "Akazo", cf = CFrame.new(-1132,1380,-1747) },
+        { name = "Reaper", cf = CFrame.new(98,1043,-574) },
+    }
+    log("[Crow] fallback BossData: " .. #CrowQuest.BossData .. " bosses")
+end
 
 CrowQuest.Cfg = {
     CrowSlot = 5,
@@ -34,8 +55,9 @@ local function getQuestRuntime()
     return d.Quests.Holder
 end
 
+-- FIX 3: match cả "Defeat X" và "Defeat Boss X" + "Defeat  X" (nhiều space)
 local function findBossByText(text)
-    if not text then return nil end
+    if not text or type(text) ~= "string" then return nil end
     local lower = text:lower()
     for _, b in ipairs(CrowQuest.BossData or {}) do
         if lower:find(b.name:lower(), 1, true) then return b end
@@ -62,17 +84,25 @@ local function getActiveQuestBoss()
     return nil
 end
 
--- ============ Slot switching (proven working in v1) ============
-local SLOT_VK = { 49, 50, 51, 52, 53 }  -- 1,2,3,4,5
-local SLOT_KC = {
-    Enum.KeyCode.One, Enum.KeyCode.Two, Enum.KeyCode.Three,
-    Enum.KeyCode.Four, Enum.KeyCode.Five,
-}
+-- FIX 2: walk-up Visible check
+local function isVisibleChain(obj)
+    local p = obj
+    for _ = 1, 10 do
+        if not p then return true end
+        local okV, v = pcall(function() return p.Visible end)
+        if okV and v == false then return false end
+        p = p.Parent
+    end
+    return true
+end
+
+-- ============ Slot switching ============
+local SLOT_VK = { 49, 50, 51, 52, 53 }
+local SLOT_KC = { Enum.KeyCode.One, Enum.KeyCode.Two, Enum.KeyCode.Three, Enum.KeyCode.Four, Enum.KeyCode.Five }
 
 local function equipSlot(slotNum)
     slotNum = math.clamp(tonumber(slotNum) or 1, 1, 5)
 
-    -- Method 1: keypress executor API (worked in v1)
     if type(keypress) == "function" then
         local vk = SLOT_VK[slotNum]
         pcall(function()
@@ -85,7 +115,6 @@ local function equipSlot(slotNum)
         return true
     end
 
-    -- Method 2: VirtualInputManager
     local kc = SLOT_KC[slotNum]
     if kc then
         pcall(function()
@@ -96,86 +125,97 @@ local function equipSlot(slotNum)
         log("[Crow] slot " .. slotNum .. " via VIM")
         return true
     end
-
-    log("[Crow] slot " .. slotNum .. " FAILED")
     return false
 end
 
--- ============ Crow click (multi-method) ============
+-- ============ FIX 4: Click crow at multiple positions ============
 local function clickCrow()
     local cam = workspace.CurrentCamera
     local vs = cam and cam.ViewportSize or Vector2.new(1280, 720)
-    -- Crow appears right side of screen ~ (0.75, 0.5)
-    local cx = vs.X * 0.75
-    local cy = vs.Y * 0.5
+    local mouse = LP:GetMouse()
 
-    -- Method 1: mouse1click executor API
-    if type(mouse1click) == "function" then
-        pcall(mouse1click)
-        log("[Crow] click via mouse1click")
-        return
+    -- Crow flies from character → try center, then a few offsets
+    local positions = {
+        { vs.X * 0.5, vs.Y * 0.5 },
+        { vs.X * 0.5, vs.Y * 0.4 },
+        { vs.X * 0.6, vs.Y * 0.45 },
+        { vs.X * 0.4, vs.Y * 0.45 },
+        { vs.X * 0.75, vs.Y * 0.5 },
+    }
+
+    for i, p in ipairs(positions) do
+        if mouse and type(mousemoverel) == "function" then
+            pcall(function()
+                mousemoverel(p[1] - mouse.X, p[2] - mouse.Y)
+            end)
+            task.wait(0.15)
+        end
+
+        if type(mouse1click) == "function" then
+            pcall(mouse1click)
+        elseif type(mouse1press) == "function" then
+            pcall(function()
+                mouse1press()
+                task.wait(0.08)
+                if type(mouse1release) == "function" then mouse1release() end
+            end)
+        else
+            pcall(function()
+                VirtualInputManager:SendMouseButtonEvent(p[1], p[2], 0, true, game, 0)
+                task.wait(0.08)
+                VirtualInputManager:SendMouseButtonEvent(p[1], p[2], 0, false, game, 0)
+            end)
+        end
+        log("[Crow] click #" .. i .. " at " .. math.floor(p[1]) .. "," .. math.floor(p[2]))
+        task.wait(0.35)
     end
-
-    -- Method 2: mouse1press + release
-    if type(mouse1press) == "function" and type(mouse1release) == "function" then
-        pcall(function()
-            mouse1press()
-            task.wait(0.08)
-            mouse1release()
-        end)
-        log("[Crow] click via mouse1press/release")
-        return
-    end
-
-    -- Method 3: VirtualInputManager
-    pcall(function()
-        VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, true, game, 0)
-        task.wait(0.1)
-        VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, false, game, 0)
-    end)
-    log("[Crow] click via VIM at " .. math.floor(cx) .. "," .. math.floor(cy))
 end
 
--- ============ Menu scanner (matches debug structure) ============
+-- ============ ScanMenu with debug ============
 function CrowQuest:ScanMenu()
     local pg = LP:FindFirstChild("PlayerGui")
     if not pg then return {} end
 
     local choices = {}
     local seen = {}
+    local defeatCount = 0
+    local visibleCount = 0
+    local matchedCount = 0
 
     for _, d in ipairs(pg:GetDescendants()) do
         if not (d:IsA("TextLabel") or d:IsA("TextButton")) then continue end
         local txt = d.Text or ""
         if not txt:find("Defeat", 1, true) then continue end
+        defeatCount = defeatCount + 1
+
+        -- FIX 2: check ancestor visibility
+        if not isVisibleChain(d) then continue end
+        visibleCount = visibleCount + 1
 
         local bossData = findBossByText(txt)
         if not bossData then continue end
+        matchedCount = matchedCount + 1
 
-        -- Skip invisible
-        local okV, vis = pcall(function() return d.Visible end)
-        if okV and not vis then continue end
-
-        -- Container: Frame "Content" (from debug)
+        -- Container
         local frame = d
         for _ = 1, 6 do
             if not frame or not frame.Parent then break end
             frame = frame.Parent
-            if frame.Name == "Content" or frame:IsA("Frame") then
+            if frame:IsA("Frame") then
                 local okS, sz = pcall(function() return frame.AbsoluteSize end)
                 if okS and sz and sz.X >= 100 and sz.Y >= 40 then break end
             end
         end
         if not frame then continue end
 
-        -- Dedupe by boss + Y bucket
+        -- Dedupe
         local okP, ap = pcall(function() return d.AbsolutePosition end)
         if not okP or not ap then continue end
         local key = bossData.name .. "@" .. math.floor(ap.Y / 30)
         if seen[key] then continue end
         seen[key] = true
 
-        -- Parse exp/wen from container parent (HuntN frame)
+        -- Parse exp/wen from container's grandparent (HuntN frame)
         local parseRoot = frame
         for _ = 1, 2 do
             if parseRoot and parseRoot.Parent and parseRoot.Parent:IsA("Frame") then
@@ -198,7 +238,6 @@ function CrowQuest:ScanMenu()
             elseif n >= 100 and n < 10000 and wen == 0 and n ~= exp then wen = n end
         end
 
-        -- Click position: use TextLabel center (whole card is clickable)
         local cx = ap.X + (d.AbsoluteSize.X or 100) * 0.5
         local cy = ap.Y + (d.AbsoluteSize.Y or 20) * 0.5
 
@@ -207,6 +246,21 @@ function CrowQuest:ScanMenu()
             Frame = frame, Label = d,
             X = cx, Y = cy,
         })
+    end
+
+    -- Debug output (chỉ log khi có Defeat nhưng scan fail)
+    if defeatCount > 0 and #choices == 0 then
+        log("[Crow] DEBUG: Defeat=" .. defeatCount .. " visible=" .. visibleCount .. " matched=" .. matchedCount .. " choices=0")
+        -- Log first few texts
+        local n = 0
+        for _, d in ipairs(pg:GetDescendants()) do
+            if (d:IsA("TextLabel") or d:IsA("TextButton")) and d.Text:find("Defeat", 1, true) then
+                n = n + 1
+                if n <= 3 then
+                    log("[Crow] DEBUG text: '" .. d.Text .. "' vis=" .. tostring(d.Visible))
+                end
+            end
+        end
     end
 
     return choices
@@ -228,7 +282,6 @@ end
 
 -- ============ Click mission ============
 local function clickMission(choice)
-    -- Move mouse to target then click
     local mouse = LP:GetMouse()
     if mouse and type(mousemoverel) == "function" then
         pcall(function()
@@ -237,14 +290,10 @@ local function clickMission(choice)
         task.wait(0.2)
     end
 
-    -- Method 1: mouse1click
     if type(mouse1click) == "function" then
         pcall(mouse1click)
     end
-
     task.wait(0.1)
-
-    -- Method 2: mouse1press/release
     if type(mouse1press) == "function" and type(mouse1release) == "function" then
         pcall(function()
             mouse1press()
@@ -252,20 +301,17 @@ local function clickMission(choice)
             mouse1release()
         end)
     end
-
     task.wait(0.1)
-
-    -- Method 3: VirtualInputManager as fallback
     pcall(function()
         VirtualInputManager:SendMouseButtonEvent(choice.X, choice.Y, 0, true, game, 0)
         task.wait(0.08)
         VirtualInputManager:SendMouseButtonEvent(choice.X, choice.Y, 0, false, game, 0)
     end)
 
-    log("[Crow] clicked at " .. math.floor(choice.X) .. "," .. math.floor(choice.Y))
+    log("[Crow] mission clicked at " .. math.floor(choice.X) .. "," .. math.floor(choice.Y))
 end
 
--- ============ Wait helper ============
+-- ============ Wait ============
 local function waitFor(tok, pred, timeout)
     local t = 0
     while tok.Active and Runtime.Alive and t < timeout do
@@ -314,7 +360,7 @@ function CrowQuest:FightBoss(tok, boss)
     return false
 end
 
--- ============ Main Run ============
+-- ============ Main ============
 function CrowQuest:Run(tok)
     local cfg = self.Cfg
     local retry = tonumber(cfg.RetryDelay) or 2.0
@@ -347,7 +393,6 @@ function CrowQuest:Run(tok)
             task.wait(0.7)
 
             clickCrow()
-            log("[Crow] clicked crow")
 
             local gotMenu = waitFor(tok, function()
                 return #self:ScanMenu() > 0
@@ -417,7 +462,6 @@ task.spawn(function()
     if not questTab then return end
 
     local crowGB = window:AddGroupbox(questTab, "Crow Quest")
-
     window:AddDropdown(crowGB, "_CrowSlot", {
         Text = "Crow Slot",
         Values = { "1", "2", "3", "4", "5" },
@@ -454,4 +498,4 @@ task.spawn(function()
     log("[Crow] UI added")
 end)
 
-print("[ToRung/CROW] v4.0 | keypress + clickCrow + debug")
+print("[ToRung/CROW] v5.0 | multi-click + walk-vis + debug")
