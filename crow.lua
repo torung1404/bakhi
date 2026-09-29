@@ -1,4 +1,4 @@
--- crow.lua - Crow Quest v3.1 (scan-all + cooldown + hold-T + safe-weapon-swap)
+-- crow.lua - v4 (Delta only, keypress slot, debug-friendly)
 local S2 = getgenv().S2
 if not S2 or not S2.Core then return warn("[Crow] core missing") end
 if not S2.Features then return warn("[Crow] features missing") end
@@ -10,6 +10,7 @@ local log = S2.Core.log
 
 local Players = game:GetService("Players")
 local LP = Players.LocalPlayer
+local VirtualInputManager = game:GetService("VirtualInputManager")
 
 local CrowQuest = S2.Features.CrowQuest
 if not CrowQuest then return warn("[Crow] no CrowQuest table") end
@@ -61,45 +62,81 @@ local function getActiveQuestBoss()
     return nil
 end
 
--- ============ Equip ============
+-- ============ Slot switching (proven working in v1) ============
+local SLOT_VK = { 49, 50, 51, 52, 53 }  -- 1,2,3,4,5
+local SLOT_KC = {
+    Enum.KeyCode.One, Enum.KeyCode.Two, Enum.KeyCode.Three,
+    Enum.KeyCode.Four, Enum.KeyCode.Five,
+}
+
 local function equipSlot(slotNum)
     slotNum = math.clamp(tonumber(slotNum) or 1, 1, 5)
-    local ok = pcall(function()
-        local items = LP:FindFirstChild("Items_Config")
-        if items and items:FindFirstChild("Equipped") then
-            items.Equipped.Value = slotNum
-        end
-    end)
-    if ok then log("[Crow] equipped slot " .. slotNum)
-    else log("[Crow] equip failed slot " .. slotNum) end
-    return ok
+
+    -- Method 1: keypress executor API (worked in v1)
+    if type(keypress) == "function" then
+        local vk = SLOT_VK[slotNum]
+        pcall(function()
+            if type(keyrelease) == "function" then keyrelease(vk) end
+            keypress(vk)
+            task.wait(0.15)
+            if type(keyrelease) == "function" then keyrelease(vk) end
+        end)
+        log("[Crow] slot " .. slotNum .. " via keypress(" .. vk .. ")")
+        return true
+    end
+
+    -- Method 2: VirtualInputManager
+    local kc = SLOT_KC[slotNum]
+    if kc then
+        pcall(function()
+            VirtualInputManager:SendKeyEvent(true, kc, false, game)
+            task.wait(0.1)
+            VirtualInputManager:SendKeyEvent(false, kc, false, game)
+        end)
+        log("[Crow] slot " .. slotNum .. " via VIM")
+        return true
+    end
+
+    log("[Crow] slot " .. slotNum .. " FAILED")
+    return false
 end
 
-local function clickCenter()
-    local vu = game:GetService("VirtualUser")
+-- ============ Crow click (multi-method) ============
+local function clickCrow()
     local cam = workspace.CurrentCamera
     local vs = cam and cam.ViewportSize or Vector2.new(1280, 720)
+    -- Crow appears right side of screen ~ (0.75, 0.5)
+    local cx = vs.X * 0.75
+    local cy = vs.Y * 0.5
+
+    -- Method 1: mouse1click executor API
+    if type(mouse1click) == "function" then
+        pcall(mouse1click)
+        log("[Crow] click via mouse1click")
+        return
+    end
+
+    -- Method 2: mouse1press + release
+    if type(mouse1press) == "function" and type(mouse1release) == "function" then
+        pcall(function()
+            mouse1press()
+            task.wait(0.08)
+            mouse1release()
+        end)
+        log("[Crow] click via mouse1press/release")
+        return
+    end
+
+    -- Method 3: VirtualInputManager
     pcall(function()
-        vu:CaptureController()
-        vu:ClickButton1(Vector2.new(vs.X * 0.5, vs.Y * 0.5))
-        vu:ReleaseController()
+        VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, true, game, 0)
+        task.wait(0.1)
+        VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, false, game, 0)
     end)
+    log("[Crow] click via VIM at " .. math.floor(cx) .. "," .. math.floor(cy))
 end
 
--- ============ Hold T ============
-local VirtualInputManager = game:GetService("VirtualInputManager")
-local function holdT(duration)
-    duration = tonumber(duration) or 2.0
-    pcall(function()
-        VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.T, false, game)
-    end)
-    task.wait(duration)
-    pcall(function()
-        VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.T, false, game)
-    end)
-end
-
--- ============ ScanMenu ============
+-- ============ Menu scanner (matches debug structure) ============
 function CrowQuest:ScanMenu()
     local pg = LP:FindFirstChild("PlayerGui")
     if not pg then return {} end
@@ -115,28 +152,38 @@ function CrowQuest:ScanMenu()
         local bossData = findBossByText(txt)
         if not bossData then continue end
 
+        -- Skip invisible
         local okV, vis = pcall(function() return d.Visible end)
         if okV and not vis then continue end
 
+        -- Container: Frame "Content" (from debug)
         local frame = d
         for _ = 1, 6 do
             if not frame or not frame.Parent then break end
             frame = frame.Parent
-            if frame:IsA("Frame") then
+            if frame.Name == "Content" or frame:IsA("Frame") then
                 local okS, sz = pcall(function() return frame.AbsoluteSize end)
-                if okS and sz and sz.X >= 200 and sz.Y >= 40 then break end
+                if okS and sz and sz.X >= 100 and sz.Y >= 40 then break end
             end
         end
         if not frame then continue end
 
+        -- Dedupe by boss + Y bucket
         local okP, ap = pcall(function() return d.AbsolutePosition end)
         if not okP or not ap then continue end
         local key = bossData.name .. "@" .. math.floor(ap.Y / 30)
         if seen[key] then continue end
         seen[key] = true
 
+        -- Parse exp/wen from container parent (HuntN frame)
+        local parseRoot = frame
+        for _ = 1, 2 do
+            if parseRoot and parseRoot.Parent and parseRoot.Parent:IsA("Frame") then
+                parseRoot = parseRoot.Parent
+            end
+        end
         local allNums = {}
-        for _, x in ipairs(frame:GetDescendants()) do
+        for _, x in ipairs(parseRoot:GetDescendants()) do
             if x:IsA("TextLabel") or x:IsA("TextButton") then
                 for numStr in (x.Text or ""):gmatch("([%d,]+)") do
                     local n = tonumber(numStr:gsub(",", ""))
@@ -151,25 +198,17 @@ function CrowQuest:ScanMenu()
             elseif n >= 100 and n < 10000 and wen == 0 and n ~= exp then wen = n end
         end
 
-        local btn = d
-        for _ = 1, 6 do
-            if not btn then break end
-            if btn:IsA("TextButton") or btn:IsA("ImageButton") then break end
-            btn = btn.Parent
-        end
-        if not btn then btn = d end
-
-        local okB, bap = pcall(function() return btn.AbsolutePosition end)
-        local okBS, bas = pcall(function() return btn.AbsoluteSize end)
-        local bx = (okB and bap and bap.X or ap.X) + (okBS and bas and bas.X * 0.5 or 100)
-        local by = (okB and bap and bap.Y or ap.Y) + (okBS and bas and bas.Y * 0.5 or 20)
+        -- Click position: use TextLabel center (whole card is clickable)
+        local cx = ap.X + (d.AbsoluteSize.X or 100) * 0.5
+        local cy = ap.Y + (d.AbsoluteSize.Y or 20) * 0.5
 
         table.insert(choices, {
             Boss = bossData, Exp = exp, Wen = wen,
-            Button = btn, Frame = frame,
-            X = bx, Y = by,
+            Frame = frame, Label = d,
+            X = cx, Y = cy,
         })
     end
+
     return choices
 end
 
@@ -187,148 +226,58 @@ function CrowQuest:PickBestMission(choices)
     return sorted[1]
 end
 
+-- ============ Click mission ============
 local function clickMission(choice)
-    if choice.Button and firesignal then
-        pcall(firesignal, choice.Button.MouseButton1Click)
+    -- Move mouse to target then click
+    local mouse = LP:GetMouse()
+    if mouse and type(mousemoverel) == "function" then
+        pcall(function()
+            mousemoverel(choice.X - mouse.X, choice.Y - mouse.Y)
+        end)
+        task.wait(0.2)
     end
+
+    -- Method 1: mouse1click
+    if type(mouse1click) == "function" then
+        pcall(mouse1click)
+    end
+
+    task.wait(0.1)
+
+    -- Method 2: mouse1press/release
+    if type(mouse1press) == "function" and type(mouse1release) == "function" then
+        pcall(function()
+            mouse1press()
+            task.wait(0.08)
+            mouse1release()
+        end)
+    end
+
+    task.wait(0.1)
+
+    -- Method 3: VirtualInputManager as fallback
     pcall(function()
-        local vu = game:GetService("VirtualUser")
-        vu:CaptureController()
-        vu:ClickButton1(Vector2.new(choice.X, choice.Y))
-        vu:ReleaseController()
+        VirtualInputManager:SendMouseButtonEvent(choice.X, choice.Y, 0, true, game, 0)
+        task.wait(0.08)
+        VirtualInputManager:SendMouseButtonEvent(choice.X, choice.Y, 0, false, game, 0)
     end)
+
     log("[Crow] clicked at " .. math.floor(choice.X) .. "," .. math.floor(choice.Y))
 end
 
+-- ============ Wait helper ============
 local function waitFor(tok, pred, timeout)
     local t = 0
     while tok.Active and Runtime.Alive and t < timeout do
         local ok, r = pcall(pred)
         if ok and r then return true end
-        task.wait(0.2)
-        t = t + 0.2
+        task.wait(0.25)
+        t = t + 0.25
     end
     return false
 end
 
--- ============ OVERRIDE CollectLoot ============
-function CrowQuest:CollectLoot(position, radius)
-    radius = radius or 200
-    local CS = game:GetService("CollectionService")
-    local r = GameAPI:GetRoot()
-    if not r then return end
-
-    task.wait(1.5)
-
-    for _ = 1, 3 do
-        local foundAny = false
-
-        pcall(function()
-            for _, obj in ipairs(CS:GetTagged("LootDrop")) do
-                if not self.Active then return end
-                local part = obj:IsA("BasePart") and obj or obj:FindFirstChildWhichIsA("BasePart")
-                if part and (part.Position - position).Magnitude < radius then
-                    foundAny = true
-                    r.CFrame = part.CFrame * CFrame.new(0, 0, 2)
-                    r.AssemblyLinearVelocity = Vector3.zero
-                    task.wait(0.2)
-                    holdT(0.3)
-                    for _, desc in ipairs(obj:GetDescendants()) do
-                        if desc:IsA("ProximityPrompt") and desc.Enabled then
-                            pcall(fireproximityprompt, desc)
-                        end
-                    end
-                    task.wait(0.4)
-                end
-            end
-        end)
-
-        pcall(function()
-            for _, obj in ipairs(CS:GetTagged("Chest")) do
-                if not self.Active then return end
-                local rootPart = obj:FindFirstChild("RootPart") or obj:FindFirstChildWhichIsA("BasePart")
-                if rootPart and (rootPart.Position - position).Magnitude < radius then
-                    foundAny = true
-                    r.CFrame = rootPart.CFrame * CFrame.new(0, 0, 3)
-                    r.AssemblyLinearVelocity = Vector3.zero
-                    task.wait(0.4)
-                    holdT(2.0)
-                    task.wait(0.5)
-                end
-            end
-        end)
-
-        pcall(function()
-            local ld = workspace:FindFirstChild("LootDrops")
-            if not ld then return end
-            for _, child in ipairs(ld:GetChildren()) do
-                if not self.Active then return end
-                local part = child:IsA("BasePart") and child or child:FindFirstChildWhichIsA("BasePart")
-                if part and (part.Position - position).Magnitude < radius then
-                    foundAny = true
-                    r.CFrame = part.CFrame * CFrame.new(0, 0, 2)
-                    r.AssemblyLinearVelocity = Vector3.zero
-                    task.wait(0.2)
-                    holdT(0.4)
-                    for _, desc in ipairs(child:GetDescendants()) do
-                        if desc:IsA("ProximityPrompt") then
-                            pcall(fireproximityprompt, desc)
-                        end
-                    end
-                    task.wait(0.3)
-                end
-            end
-        end)
-
-        pcall(function()
-            local ch = workspace:FindFirstChild("Chests")
-            if not ch then return end
-            for _, child in ipairs(ch:GetChildren()) do
-                if not self.Active then return end
-                local rootPart = child:FindFirstChild("RootPart") or child:FindFirstChildWhichIsA("BasePart")
-                if rootPart and (rootPart.Position - position).Magnitude < radius then
-                    foundAny = true
-                    r.CFrame = rootPart.CFrame * CFrame.new(0, 0, 3)
-                    r.AssemblyLinearVelocity = Vector3.zero
-                    task.wait(0.4)
-                    holdT(2.0)
-                    task.wait(0.5)
-                end
-            end
-        end)
-
-        pcall(function()
-            local db = workspace:FindFirstChild("Debree")
-            if not db then return end
-            for _, child in ipairs(db:GetChildren()) do
-                if not self.Active then return end
-                local name = child.Name:lower()
-                if name:find("loot") or name:find("drop") or name:find("chest") or name:find("reward") then
-                    local part = child:IsA("BasePart") and child or child:FindFirstChildWhichIsA("BasePart")
-                    if part and (part.Position - position).Magnitude < radius then
-                        foundAny = true
-                        r.CFrame = part.CFrame * CFrame.new(0, 0, 2)
-                        r.AssemblyLinearVelocity = Vector3.zero
-                        task.wait(0.3)
-                        holdT(1.5)
-                        for _, desc in ipairs(child:GetDescendants()) do
-                            if desc:IsA("ProximityPrompt") and desc.Enabled then
-                                pcall(fireproximityprompt, desc)
-                            end
-                        end
-                        task.wait(0.4)
-                    end
-                end
-            end
-        end)
-
-        if not foundAny then break end
-        task.wait(0.5)
-    end
-    log("[Crow] loot collected")
-end
-
--- ============ Fight ============
+-- ============ Fight boss ============
 function CrowQuest:FightBoss(tok, boss)
     if boss.cf then
         GameAPI:Teleport(boss.cf + Vector3.new(0, 3, 0))
@@ -365,7 +314,7 @@ function CrowQuest:FightBoss(tok, boss)
     return false
 end
 
--- ============ Run ============
+-- ============ Main Run ============
 function CrowQuest:Run(tok)
     local cfg = self.Cfg
     local retry = tonumber(cfg.RetryDelay) or 2.0
@@ -392,19 +341,20 @@ function CrowQuest:Run(tok)
                 task.wait(wait)
             end
 
-            log("[Crow] summoning crow (slot " .. tostring(cfg.CrowSlot) .. ")")
+            log("[Crow] equipping crow slot " .. tostring(cfg.CrowSlot))
             equipSlot(cfg.CrowSlot)
             lastCrowUse = os.clock()
-            task.wait(0.5)
-            clickCenter()
-            log("[Crow] clicked center to summon")
+            task.wait(0.7)
+
+            clickCrow()
+            log("[Crow] clicked crow")
 
             local gotMenu = waitFor(tok, function()
                 return #self:ScanMenu() > 0
-            end, 8)
+            end, 15)
 
             if not gotMenu then
-                log("[Crow] no menu, retry")
+                log("[Crow] no menu after 15s, retry")
                 task.wait(retry)
                 continue
             end
@@ -431,10 +381,10 @@ function CrowQuest:Run(tok)
 
         local gotQuest = waitFor(tok, function()
             return getActiveQuestBoss() ~= nil
-        end, 10)
+        end, 12)
 
         if not gotQuest then
-            log("[Crow] quest not registered, retry (weapon unchanged)")
+            log("[Crow] quest not registered, retry")
             task.wait(retry)
             continue
         end
@@ -504,4 +454,4 @@ task.spawn(function()
     log("[Crow] UI added")
 end)
 
-print("[ToRung/CROW] v3.1 | scan-all + cooldown + hold-T + safe-weapon-swap")
+print("[ToRung/CROW] v4.0 | keypress + clickCrow + debug")
