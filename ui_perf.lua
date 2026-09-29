@@ -4,10 +4,23 @@ if not S2 or not S2.UI or not S2.Performance then
     return warn("[ui_perf] missing deps")
 end
 
+-- ✅ DEDUP GUARD
+if S2._PerfTabAdded then
+    return warn("[ui_perf] already added, skip")
+end
+S2._PerfTabAdded = true
+
 local window = S2.UI.Window
 local Perf = S2.Performance
 local Themes = S2.UI.Themes
 if not window then return end
+
+-- Check if tab already exists
+for _, tab in ipairs(window.Tabs) do
+    if tab.Name == "Performance" then
+        return warn("[ui_perf] Performance tab already exists")
+    end
+end
 
 local perfTab = window:AddTab("Performance")
 local mainGB = window:AddGroupbox(perfTab, "Performance Mode")
@@ -87,7 +100,6 @@ window:AddSlider(mainGB, "_PerfFPS", {
     Callback = function(v) Perf.FPSCap = v; Perf:Apply(); Perf:Save() end,
 })
 
--- Apply saved state on load
 if Perf.Master then Perf:Apply() end
 
 print("[ToRung/UI-PERF] tab added")
