@@ -2,12 +2,13 @@
 local REPO = "torung1404/bakhi/main"
 local BASE = "https://raw.githubusercontent.com/" .. REPO .. "/"
 local files = {
-    "cleanup.lua",   -- ← PHẢI đứng đầu
+    "cleanup.lua",
     "core.lua", "features.lua", "ui.lua",
     "webhook.lua", "config.lua", "extras.lua", "ui_extras.lua",
     "performance.lua", "ui_perf.lua",
     "vip.lua", "lobby.lua",
     "crow.lua",
+    "autoloot.lua",
 }
 local CACHE_BUST = "?t=" .. tostring(math.floor(os.time()))
 
